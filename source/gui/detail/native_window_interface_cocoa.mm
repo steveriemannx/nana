@@ -19,6 +19,78 @@
 @interface NanaNSView : NSView
 @property (nonatomic) void* nanaWindow;
 @property (nonatomic) void* nanaRootWindow;
+- (nana::point)cvtPt:(NSPoint)pt {
+    return nana::point((int)pt.x, (int)(self.bounds.size.height - pt.y));
+}
+- (void)mouseDown:(NSEvent*)e { [self forwardMouse:e type:0]; }
+- (void)mouseUp:(NSEvent*)e { [self forwardMouse:e type:1]; }
+- (void)rightMouseDown:(NSEvent*)e { [self forwardMouse:e type:2]; }
+- (void)rightMouseUp:(NSEvent*)e { [self forwardMouse:e type:3]; }
+- (void)mouseMoved:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)mouseDragged:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)rightMouseDragged:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)scrollWheel:(NSEvent*)e { [self forwardMouse:e type:5]; }
+- (void)forwardMouse:(NSEvent*)e type:(int)t {
+    if (!_nanaRootWindow) return;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) return;
+    NSPoint loc = [self convertPoint:[e locationInWindow] fromView:nil];
+    nana::point pt = [self cvtPt:loc];
+    auto* tw = b.wd_manager().find_window((nana::detail::native_window_type)_nanaRootWindow, pt);
+    if (!tw) tw = rw;
+    nana::arg_mouse arg; arg.window_handle = tw;
+    arg.pos.x = (int)loc.x - tw->pos_root.x;
+    arg.pos.y = (int)(self.bounds.size.height - loc.y) - tw->pos_root.y;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.left_button=arg.right_button=arg.mid_button=false;
+    if(t==0){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::left_button;arg.left_button=true;tw->set_action(nana::mouse_action::pressed);b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==1){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::left_button;tw->set_action(nana::mouse_action::normal);b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));nana::arg_click ca;ca.window_handle=tw;ca.mouse_args=&arg;b.emit(nana::event_code::click,tw,ca,true,b.get_thread_context(tw->thread_id));b.wd_manager().do_lazy_refresh(tw,false);}
+    else if(t==2){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::right_button;arg.right_button=true;b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==3){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::right_button;b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==4){arg.evt_code=nana::event_code::mouse_move;b.emit(nana::event_code::mouse_move,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==5){nana::arg_wheel wa;wa.window_handle=tw;wa.evt_code=nana::event_code::mouse_wheel;wa.pos=arg.pos;wa.upwards=([e scrollingDeltaY]>0);wa.distance=120;wa.which=nana::arg_wheel::wheel::vertical;b.emit(nana::event_code::mouse_wheel,tw,wa,true,b.get_thread_context(tw->thread_id));}
+    [self setNeedsDisplay:YES];
+}
+- (void)keyDown:(NSEvent*)e {
+    if (!_nanaRootWindow) { [self interpretKeyEvents:@[e]]; return; }
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) { [self interpretKeyEvents:@[e]]; return; }
+    auto* fw = b.focus(); if (!fw) fw = rw;
+    nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_press;
+    arg.key = [[e characters] length]>0 ? [[e characters] characterAtIndex:0] : 0;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.ignore = false;
+    b.emit(nana::event_code::key_press, fw, arg, true, b.get_thread_context(fw->thread_id));
+    b.wd_manager().do_lazy_refresh(fw, false);
+    [self interpretKeyEvents:@[e]];
+}
+- (void)keyUp:(NSEvent*)e {
+    if (!_nanaRootWindow) return;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) return; auto* fw = b.focus(); if (!fw) fw = rw;
+    nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_release;
+    arg.key = [[e characters] length]>0 ? [[e characters] characterAtIndex:0] : 0;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.ignore = false;
+    b.emit(nana::event_code::key_release, fw, arg, true, b.get_thread_context(fw->thread_id));
+}
+- (void)insertText:(id)str replacementRange:(NSRange)rr {
+    if ([str isKindOfClass:[NSString class]] && _nanaRootWindow) {
+        auto& b = nana::detail::bedrock::instance();
+        auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+        if (!rw) return; auto* fw = b.focus(); if (!fw) fw = rw;
+        nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_char;
+        arg.key = [(NSString*)str characterAtIndex:0]; arg.ignore = false;
+        b.emit(nana::event_code::key_char, fw, arg, true, b.get_thread_context(fw->thread_id));
+        b.wd_manager().do_lazy_refresh(fw, false);
+    }
+}
 @end
 
 @implementation NanaNSView
@@ -39,6 +111,78 @@
         }
     }
 }
+- (nana::point)cvtPt:(NSPoint)pt {
+    return nana::point((int)pt.x, (int)(self.bounds.size.height - pt.y));
+}
+- (void)mouseDown:(NSEvent*)e { [self forwardMouse:e type:0]; }
+- (void)mouseUp:(NSEvent*)e { [self forwardMouse:e type:1]; }
+- (void)rightMouseDown:(NSEvent*)e { [self forwardMouse:e type:2]; }
+- (void)rightMouseUp:(NSEvent*)e { [self forwardMouse:e type:3]; }
+- (void)mouseMoved:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)mouseDragged:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)rightMouseDragged:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)scrollWheel:(NSEvent*)e { [self forwardMouse:e type:5]; }
+- (void)forwardMouse:(NSEvent*)e type:(int)t {
+    if (!_nanaRootWindow) return;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) return;
+    NSPoint loc = [self convertPoint:[e locationInWindow] fromView:nil];
+    nana::point pt = [self cvtPt:loc];
+    auto* tw = b.wd_manager().find_window((nana::detail::native_window_type)_nanaRootWindow, pt);
+    if (!tw) tw = rw;
+    nana::arg_mouse arg; arg.window_handle = tw;
+    arg.pos.x = (int)loc.x - tw->pos_root.x;
+    arg.pos.y = (int)(self.bounds.size.height - loc.y) - tw->pos_root.y;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.left_button=arg.right_button=arg.mid_button=false;
+    if(t==0){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::left_button;arg.left_button=true;tw->set_action(nana::mouse_action::pressed);b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==1){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::left_button;tw->set_action(nana::mouse_action::normal);b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));nana::arg_click ca;ca.window_handle=tw;ca.mouse_args=&arg;b.emit(nana::event_code::click,tw,ca,true,b.get_thread_context(tw->thread_id));b.wd_manager().do_lazy_refresh(tw,false);}
+    else if(t==2){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::right_button;arg.right_button=true;b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==3){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::right_button;b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==4){arg.evt_code=nana::event_code::mouse_move;b.emit(nana::event_code::mouse_move,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==5){nana::arg_wheel wa;wa.window_handle=tw;wa.evt_code=nana::event_code::mouse_wheel;wa.pos=arg.pos;wa.upwards=([e scrollingDeltaY]>0);wa.distance=120;wa.which=nana::arg_wheel::wheel::vertical;b.emit(nana::event_code::mouse_wheel,tw,wa,true,b.get_thread_context(tw->thread_id));}
+    [self setNeedsDisplay:YES];
+}
+- (void)keyDown:(NSEvent*)e {
+    if (!_nanaRootWindow) { [self interpretKeyEvents:@[e]]; return; }
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) { [self interpretKeyEvents:@[e]]; return; }
+    auto* fw = b.focus(); if (!fw) fw = rw;
+    nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_press;
+    arg.key = [[e characters] length]>0 ? [[e characters] characterAtIndex:0] : 0;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.ignore = false;
+    b.emit(nana::event_code::key_press, fw, arg, true, b.get_thread_context(fw->thread_id));
+    b.wd_manager().do_lazy_refresh(fw, false);
+    [self interpretKeyEvents:@[e]];
+}
+- (void)keyUp:(NSEvent*)e {
+    if (!_nanaRootWindow) return;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) return; auto* fw = b.focus(); if (!fw) fw = rw;
+    nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_release;
+    arg.key = [[e characters] length]>0 ? [[e characters] characterAtIndex:0] : 0;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.ignore = false;
+    b.emit(nana::event_code::key_release, fw, arg, true, b.get_thread_context(fw->thread_id));
+}
+- (void)insertText:(id)str replacementRange:(NSRange)rr {
+    if ([str isKindOfClass:[NSString class]] && _nanaRootWindow) {
+        auto& b = nana::detail::bedrock::instance();
+        auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+        if (!rw) return; auto* fw = b.focus(); if (!fw) fw = rw;
+        nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_char;
+        arg.key = [(NSString*)str characterAtIndex:0]; arg.ignore = false;
+        b.emit(nana::event_code::key_char, fw, arg, true, b.get_thread_context(fw->thread_id));
+        b.wd_manager().do_lazy_refresh(fw, false);
+    }
+}
 @end
 
 // ===================================================================
@@ -46,6 +190,78 @@
 // ===================================================================
 @interface NanaNSWindowDelegate : NSObject <NSWindowDelegate>
 @property (nonatomic) void* nanaRoot;
+- (nana::point)cvtPt:(NSPoint)pt {
+    return nana::point((int)pt.x, (int)(self.bounds.size.height - pt.y));
+}
+- (void)mouseDown:(NSEvent*)e { [self forwardMouse:e type:0]; }
+- (void)mouseUp:(NSEvent*)e { [self forwardMouse:e type:1]; }
+- (void)rightMouseDown:(NSEvent*)e { [self forwardMouse:e type:2]; }
+- (void)rightMouseUp:(NSEvent*)e { [self forwardMouse:e type:3]; }
+- (void)mouseMoved:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)mouseDragged:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)rightMouseDragged:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)scrollWheel:(NSEvent*)e { [self forwardMouse:e type:5]; }
+- (void)forwardMouse:(NSEvent*)e type:(int)t {
+    if (!_nanaRootWindow) return;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) return;
+    NSPoint loc = [self convertPoint:[e locationInWindow] fromView:nil];
+    nana::point pt = [self cvtPt:loc];
+    auto* tw = b.wd_manager().find_window((nana::detail::native_window_type)_nanaRootWindow, pt);
+    if (!tw) tw = rw;
+    nana::arg_mouse arg; arg.window_handle = tw;
+    arg.pos.x = (int)loc.x - tw->pos_root.x;
+    arg.pos.y = (int)(self.bounds.size.height - loc.y) - tw->pos_root.y;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.left_button=arg.right_button=arg.mid_button=false;
+    if(t==0){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::left_button;arg.left_button=true;tw->set_action(nana::mouse_action::pressed);b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==1){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::left_button;tw->set_action(nana::mouse_action::normal);b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));nana::arg_click ca;ca.window_handle=tw;ca.mouse_args=&arg;b.emit(nana::event_code::click,tw,ca,true,b.get_thread_context(tw->thread_id));b.wd_manager().do_lazy_refresh(tw,false);}
+    else if(t==2){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::right_button;arg.right_button=true;b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==3){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::right_button;b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==4){arg.evt_code=nana::event_code::mouse_move;b.emit(nana::event_code::mouse_move,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==5){nana::arg_wheel wa;wa.window_handle=tw;wa.evt_code=nana::event_code::mouse_wheel;wa.pos=arg.pos;wa.upwards=([e scrollingDeltaY]>0);wa.distance=120;wa.which=nana::arg_wheel::wheel::vertical;b.emit(nana::event_code::mouse_wheel,tw,wa,true,b.get_thread_context(tw->thread_id));}
+    [self setNeedsDisplay:YES];
+}
+- (void)keyDown:(NSEvent*)e {
+    if (!_nanaRootWindow) { [self interpretKeyEvents:@[e]]; return; }
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) { [self interpretKeyEvents:@[e]]; return; }
+    auto* fw = b.focus(); if (!fw) fw = rw;
+    nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_press;
+    arg.key = [[e characters] length]>0 ? [[e characters] characterAtIndex:0] : 0;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.ignore = false;
+    b.emit(nana::event_code::key_press, fw, arg, true, b.get_thread_context(fw->thread_id));
+    b.wd_manager().do_lazy_refresh(fw, false);
+    [self interpretKeyEvents:@[e]];
+}
+- (void)keyUp:(NSEvent*)e {
+    if (!_nanaRootWindow) return;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) return; auto* fw = b.focus(); if (!fw) fw = rw;
+    nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_release;
+    arg.key = [[e characters] length]>0 ? [[e characters] characterAtIndex:0] : 0;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.ignore = false;
+    b.emit(nana::event_code::key_release, fw, arg, true, b.get_thread_context(fw->thread_id));
+}
+- (void)insertText:(id)str replacementRange:(NSRange)rr {
+    if ([str isKindOfClass:[NSString class]] && _nanaRootWindow) {
+        auto& b = nana::detail::bedrock::instance();
+        auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+        if (!rw) return; auto* fw = b.focus(); if (!fw) fw = rw;
+        nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_char;
+        arg.key = [(NSString*)str characterAtIndex:0]; arg.ignore = false;
+        b.emit(nana::event_code::key_char, fw, arg, true, b.get_thread_context(fw->thread_id));
+        b.wd_manager().do_lazy_refresh(fw, false);
+    }
+}
 @end
 
 @implementation NanaNSWindowDelegate
@@ -82,6 +298,78 @@
 }
 - (void)windowDidDeminiaturize:(NSNotification*)n {
     if (_nanaRoot) { auto& b = nana::detail::bedrock::instance(); auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRoot); if (rw) b.event_expose(rw, true); }
+}
+- (nana::point)cvtPt:(NSPoint)pt {
+    return nana::point((int)pt.x, (int)(self.bounds.size.height - pt.y));
+}
+- (void)mouseDown:(NSEvent*)e { [self forwardMouse:e type:0]; }
+- (void)mouseUp:(NSEvent*)e { [self forwardMouse:e type:1]; }
+- (void)rightMouseDown:(NSEvent*)e { [self forwardMouse:e type:2]; }
+- (void)rightMouseUp:(NSEvent*)e { [self forwardMouse:e type:3]; }
+- (void)mouseMoved:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)mouseDragged:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)rightMouseDragged:(NSEvent*)e { [self forwardMouse:e type:4]; }
+- (void)scrollWheel:(NSEvent*)e { [self forwardMouse:e type:5]; }
+- (void)forwardMouse:(NSEvent*)e type:(int)t {
+    if (!_nanaRootWindow) return;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) return;
+    NSPoint loc = [self convertPoint:[e locationInWindow] fromView:nil];
+    nana::point pt = [self cvtPt:loc];
+    auto* tw = b.wd_manager().find_window((nana::detail::native_window_type)_nanaRootWindow, pt);
+    if (!tw) tw = rw;
+    nana::arg_mouse arg; arg.window_handle = tw;
+    arg.pos.x = (int)loc.x - tw->pos_root.x;
+    arg.pos.y = (int)(self.bounds.size.height - loc.y) - tw->pos_root.y;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.left_button=arg.right_button=arg.mid_button=false;
+    if(t==0){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::left_button;arg.left_button=true;tw->set_action(nana::mouse_action::pressed);b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==1){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::left_button;tw->set_action(nana::mouse_action::normal);b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));nana::arg_click ca;ca.window_handle=tw;ca.mouse_args=&arg;b.emit(nana::event_code::click,tw,ca,true,b.get_thread_context(tw->thread_id));b.wd_manager().do_lazy_refresh(tw,false);}
+    else if(t==2){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::right_button;arg.right_button=true;b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==3){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::right_button;b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==4){arg.evt_code=nana::event_code::mouse_move;b.emit(nana::event_code::mouse_move,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==5){nana::arg_wheel wa;wa.window_handle=tw;wa.evt_code=nana::event_code::mouse_wheel;wa.pos=arg.pos;wa.upwards=([e scrollingDeltaY]>0);wa.distance=120;wa.which=nana::arg_wheel::wheel::vertical;b.emit(nana::event_code::mouse_wheel,tw,wa,true,b.get_thread_context(tw->thread_id));}
+    [self setNeedsDisplay:YES];
+}
+- (void)keyDown:(NSEvent*)e {
+    if (!_nanaRootWindow) { [self interpretKeyEvents:@[e]]; return; }
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) { [self interpretKeyEvents:@[e]]; return; }
+    auto* fw = b.focus(); if (!fw) fw = rw;
+    nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_press;
+    arg.key = [[e characters] length]>0 ? [[e characters] characterAtIndex:0] : 0;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.ignore = false;
+    b.emit(nana::event_code::key_press, fw, arg, true, b.get_thread_context(fw->thread_id));
+    b.wd_manager().do_lazy_refresh(fw, false);
+    [self interpretKeyEvents:@[e]];
+}
+- (void)keyUp:(NSEvent*)e {
+    if (!_nanaRootWindow) return;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+    if (!rw) return; auto* fw = b.focus(); if (!fw) fw = rw;
+    nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_release;
+    arg.key = [[e characters] length]>0 ? [[e characters] characterAtIndex:0] : 0;
+    NSUInteger fl = [NSEvent modifierFlags];
+    arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
+    arg.ignore = false;
+    b.emit(nana::event_code::key_release, fw, arg, true, b.get_thread_context(fw->thread_id));
+}
+- (void)insertText:(id)str replacementRange:(NSRange)rr {
+    if ([str isKindOfClass:[NSString class]] && _nanaRootWindow) {
+        auto& b = nana::detail::bedrock::instance();
+        auto* rw = b.wd_manager().root((nana::detail::native_window_type)_nanaRootWindow);
+        if (!rw) return; auto* fw = b.focus(); if (!fw) fw = rw;
+        nana::arg_keyboard arg; arg.window_handle = fw; arg.evt_code = nana::event_code::key_char;
+        arg.key = [(NSString*)str characterAtIndex:0]; arg.ignore = false;
+        b.emit(nana::event_code::key_char, fw, arg, true, b.get_thread_context(fw->thread_id));
+        b.wd_manager().do_lazy_refresh(fw, false);
+    }
 }
 @end
 
