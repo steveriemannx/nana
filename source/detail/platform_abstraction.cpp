@@ -148,6 +148,8 @@ IsWindows8OrGreater()
 #endif // defined(__midl)
 #elif defined(NANA_COCOA)
 #	include "cocoa/platform_spec.hpp"
+#	include <CoreText/CoreText.h>
+#	include <CoreGraphics/CoreGraphics.h>
 #else
 #	include "posix/platform_spec.hpp"
 #	include <fontconfig/fontconfig.h>
@@ -866,9 +868,24 @@ namespace nana
 
 		auto fd = ::CreateFontIndirect(&lf);
 #elif defined(NANA_COCOA)
-		// Cocoa: font creation in platform_spec_cocoa.mm
-		(void)font_family; (void)size_pt; (void)fs; (void)ttf;
-		return {};
+		CTFontRef fd = nullptr;
+		if (font_family.empty()) font_family = "Helvetica";
+		CFStringRef fam = CFStringCreateWithCString(nullptr, font_family.c_str(), kCFStringEncodingUTF8);
+		CGFloat sz = size_pt ? size_pt : platform_abstraction::font_default_pt();
+		CTFontSymbolicTraits traits = 0;
+		if (fs.weight >= 700) traits |= kCTFontBoldTrait;
+		if (fs.italic) traits |= kCTFontItalicTrait;
+		CTFontDescriptorRef desc = CTFontDescriptorCreateWithNameAndSize(fam, sz);
+		if (desc) {
+			if (traits) {
+				CTFontDescriptorRef bd = CTFontDescriptorCreateCopyWithSymbolicTraits(desc, traits, traits);
+				if (bd) { CFRelease(desc); desc = bd; }
+			}
+			fd = CTFontCreateWithFontDescriptor(desc, sz, nullptr);
+			CFRelease(desc);
+		}
+		if (!fd) fd = CTFontCreateWithName(fam, sz, nullptr);
+		CFRelease(fam);
 #elif defined(NANA_X11)
 		auto disp = ::nana::detail::platform_spec::instance().open_display();
 #	ifdef NANA_USE_XFT
