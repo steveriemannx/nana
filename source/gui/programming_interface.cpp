@@ -22,8 +22,8 @@
 #include <nana/gui/detail/events_operation.hpp>
 
 #include "../../source/detail/platform_abstraction.hpp"
-#ifdef NANA_X11
-#	include "../../source/detail/posix/platform_spec.hpp"
+#if defined(NANA_X11)
+#include "../detail/platform_spec_selector.hpp"
 #endif
 
 namespace nana
@@ -56,7 +56,7 @@ namespace nana
 	}
 namespace API
 {
-#ifdef NANA_X11
+#if defined(NANA_X11)
 	//Some platform specific functions for X11
 	namespace x11
 	{

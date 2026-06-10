@@ -16,6 +16,8 @@
 
 #if defined(NANA_WINDOWS)
 #include "mswin/platform_spec.hpp"
-#elif defined(NANA_POSIX)
+#elif defined(NANA_COCOA)
+#include "cocoa/platform_spec.hpp"
+#elif defined(NANA_X11)
 #include "posix/platform_spec.hpp"
 #endif

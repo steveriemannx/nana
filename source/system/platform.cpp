@@ -102,10 +102,10 @@ namespace system
 		return (thread_t)::GetCurrentThreadId();
 #elif defined(NANA_LINUX)
 		return (thread_t)::syscall(__NR_gettid);
-#elif defined(NANA_MACOS)
+#elif defined(NANA_XQUARTZ)
 		return (thread_t)::syscall(SYS_thread_selfid);
 #elif defined(NANA_POSIX)
-        return (thread_t)pthread_self();
+        return (thread_t)(uintptr_t)pthread_self();
 #endif
 	}
 

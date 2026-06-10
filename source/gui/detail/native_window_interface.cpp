@@ -23,12 +23,10 @@
 #		include <mutex>
 #	endif
 #	include <map>
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 #	include <nana/system/platform.hpp>
 #	include "inner_fwd_implement.hpp"
-#endif
-
-#include "../../paint/image_accessor.hpp"
+#if !defined(NANA_COCOA)
 
 
 namespace nana{
@@ -130,7 +128,7 @@ namespace nana{
 		internal_revert_guard revert;
 		::ShowWindow(wd, cmd);
 	}
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 	namespace restrict
 	{
 		nana::detail::platform_spec & spec = nana::detail::platform_spec::instance();
@@ -321,7 +319,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			return nana::size(::GetSystemMetrics(SM_CXSCREEN), ::GetSystemMetrics(SM_CYSCREEN));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			Screen* s = ::XScreenOfDisplay(restrict::spec.open_display(), ::XDefaultScreen(restrict::spec.open_display()));
 			return nana::size(::XWidthOfScreen(s), ::XHeightOfScreen(s));
@@ -412,7 +410,7 @@ namespace nana{
 			window_result result = { reinterpret_cast<native_window_type>(native_wd),
 										static_cast<unsigned>(client.right), static_cast<unsigned>(client.bottom),
 										static_cast<unsigned>(wd_area.right - client.right), static_cast<unsigned>(wd_area.bottom - client.bottom)};
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 
 			XSetWindowAttributes win_attr;
@@ -571,7 +569,7 @@ namespace nana{
 										r.x, r.y, r.width, r.height,
 										reinterpret_cast<HWND>(parent),	// The window is a child-window to desktop
 										0, windows_module_handle(), 0);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 
 			XSetWindowAttributes win_attr;
@@ -707,7 +705,7 @@ namespace nana{
 					::SendMessage(reinterpret_cast<HWND>(wd), WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(big_handle));
 				return true;
 			}
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			if(wd && (!sml_icon.empty() || !big_icon.empty()))
 			{
 				auto & img = (sml_icon.empty() ? big_icon : sml_icon);
@@ -768,7 +766,7 @@ namespace nana{
 				if(::GetLastError() == ERROR_ACCESS_DENIED)
 					::PostMessage(reinterpret_cast<HWND>(wd), nana::detail::messages::remote_thread_destroy_window, 0, 0);
 			}
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			//Under X, XDestroyWindow destroys the specified window and generates a DestroyNotify
 			//event, when the client receives the event, the specified window has been already
 			//destroyed. This is a feature which is different from Windows. So the following
@@ -811,7 +809,7 @@ namespace nana{
 #if defined(NANA_WINDOWS)
 			int cmd = (show ? (active ? SW_SHOW : SW_SHOWNA) : SW_HIDE);
 			msw_show_window(reinterpret_cast<HWND>(wd), cmd);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			if(wd)
 			{
 				nana::detail::platform_scope_guard psg;
@@ -858,7 +856,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			msw_show_window(reinterpret_cast<HWND>(wd), SW_RESTORE);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			//Restore the window by removing NET_WM_STATE_MAXIMIZED_HORZ,
 			//_NET_WM_STATE_MAXIMIZED_VERT and _NET_WM_STATE_FULLSCREEN.
 			Display * disp = restrict::spec.open_display();
@@ -896,7 +894,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			msw_show_window(reinterpret_cast<HWND>(wd), ask_for_max ? SW_MAXIMIZE : SW_MINIMIZE);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			Display * disp = restrict::spec.open_display();
 			if (ask_for_max)
 			{
@@ -928,7 +926,7 @@ namespace nana{
 			RECT r;
 			::GetClientRect(wd, &r);
 			::InvalidateRect(wd, &r, FALSE);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			Display * disp = restrict::spec.open_display();
 			::XClearArea(disp, reinterpret_cast<Window>(native_wd), 0, 0, 1, 1, true);
 			::XFlush(disp);
@@ -939,7 +937,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			return (FALSE != ::IsWindow(reinterpret_cast<HWND>(wd)));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			XWindowAttributes attr;
 			restrict::spec.set_error_handler();
@@ -952,7 +950,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			return (FALSE != ::IsWindowVisible(reinterpret_cast<HWND>(wd)));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			XWindowAttributes attr;
 			restrict::spec.set_error_handler();
@@ -966,7 +964,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			return (FALSE != (ask_for_max ? ::IsZoomed(reinterpret_cast<HWND>(wd)) : ::IsIconic(reinterpret_cast<HWND>(wd))));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			bool zoomed = false;
     		unsigned long n,i; Atom type; unsigned char *prop; int format;
@@ -1014,7 +1012,7 @@ namespace nana{
 				return nana::point(pos.x, pos.y);
 			}
 			return nana::point(r.left, r.top);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			point scr_pos;
 			nana::detail::platform_scope_guard lock;
 
@@ -1062,7 +1060,7 @@ namespace nana{
 			}
 			else
 				::MoveWindow(reinterpret_cast<HWND>(wd), x, y, r.right - r.left, r.bottom - r.top, true);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			Display * disp = restrict::spec.open_display();
 
 			nana::detail::platform_scope_guard lock;
@@ -1133,7 +1131,7 @@ namespace nana{
 			}
 			
 			return (FALSE != ::MoveWindow(reinterpret_cast<HWND>(wd), x, y, r.width + ext_w, r.height + ext_h, true));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			Display * disp = restrict::spec.open_display();
 			long supplied;
 			XSizeHints hints;
@@ -1244,7 +1242,7 @@ namespace nana{
 				::PostMessage(reinterpret_cast<HWND>(wd), nana::detail::messages::remote_thread_set_window_pos, reinterpret_cast<WPARAM>(wa), SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
 			else
 				::SetWindowPos(reinterpret_cast<HWND>(wd), wa, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			Display * disp = restrict::spec.open_display();
 			if(0 == wd_after)
@@ -1338,7 +1336,7 @@ namespace nana{
 			}
 
 			return (FALSE != ::MoveWindow(reinterpret_cast<HWND>(wd), r.left, r.top, static_cast<int>(sz.width), static_cast<int>(sz.height), true));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			auto disp = restrict::spec.open_display();
 			nana::detail::platform_scope_guard psg;
 
@@ -1384,7 +1382,7 @@ namespace nana{
 			r.y = winr.top;
 			r.width = winr.right - winr.left;
 			r.height = winr.bottom - winr.top;
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			Window root;
 			int x, y;
 			unsigned border, depth;
@@ -1407,7 +1405,7 @@ namespace nana{
 			}
 			else
 				::SetWindowText(reinterpret_cast<HWND>(wd), title.c_str());
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			::XTextProperty name;
 			char * text = const_cast<char*>(title.c_str());
 
@@ -1446,7 +1444,7 @@ namespace nana{
 			if (!is_current_thread)
 				lock.forward();
 
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			::XTextProperty txtpro;
 			if(::XGetWMName(restrict::spec.open_display(), reinterpret_cast<Window>(wd), &txtpro))
@@ -1473,7 +1471,7 @@ namespace nana{
 				::SetCapture(reinterpret_cast<HWND>(wd));
 			else
 				::ReleaseCapture();
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			if(cap)
 			{
@@ -1498,7 +1496,7 @@ namespace nana{
 			POINT point;
 			::GetCursorPos(&point);
 			return nana::point(point.x, point.y);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::point pos;
 			Window drop_wd;
 			int x, y;
@@ -1518,7 +1516,7 @@ namespace nana{
 				return reinterpret_cast<native_window_type>(::GetAncestor(reinterpret_cast<HWND>(wd), GA_PARENT));
 			else if(window_relationship::owner == rsp)
 				return reinterpret_cast<native_window_type>(::GetWindow(reinterpret_cast<HWND>(wd), GW_OWNER));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			platform_scope_guard lock;
 
 			auto owner = restrict::spec.get_owner(wd);
@@ -1549,7 +1547,7 @@ namespace nana{
 			::SetWindowPos(reinterpret_cast<HWND>(child), NULL, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
 
 			return reinterpret_cast<native_window_type>(returns_previous ? prev : nullptr);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			native_window_type prev = nullptr;
 
 			platform_scope_guard lock;
@@ -1578,7 +1576,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			::CreateCaret(reinterpret_cast<HWND>(wd), 0, int(caret_sz.width), int(caret_sz.height));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			restrict::spec.caret_open(wd, caret_sz);
 #endif
@@ -1591,7 +1589,7 @@ namespace nana{
 				::PostMessage(reinterpret_cast<HWND>(wd), nana::detail::messages::operate_caret, 1, 0);
 			else
 				::DestroyCaret();
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			restrict::spec.caret_close(wd);
 #endif
@@ -1609,7 +1607,7 @@ namespace nana{
 			}
 			else
 				::SetCaretPos(pos.x, pos.y);
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			restrict::spec.caret_pos(wd, pos);
 #endif
@@ -1619,7 +1617,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			(vis ? ::ShowCaret : ::HideCaret)(reinterpret_cast<HWND>(wd));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			restrict::spec.caret_visible(wd, vis);
 #endif
@@ -1638,7 +1636,7 @@ namespace nana{
 					::SetFocus(reinterpret_cast<HWND>(wd));
 				}
 			}
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard lock;
 			XWindowAttributes attr;
 			::XGetWindowAttributes(restrict::spec.open_display(), reinterpret_cast<Window>(wd), &attr);
@@ -1652,7 +1650,7 @@ namespace nana{
 		{
 #if defined(NANA_WINDOWS)
 			return reinterpret_cast<native_window_type>(::GetFocus());
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			Window wd;
 			int revert;
@@ -1671,7 +1669,7 @@ namespace nana{
 				pos.y = point.y;
 				return true;
 			}
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			int x = pos.x, y = pos.y;
 			Window child;
@@ -1694,7 +1692,7 @@ namespace nana{
 				pos.y = point.y;
 				return true;
 			}
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 			int x = pos.x, y = pos.y;
 			Window child;
@@ -1711,7 +1709,7 @@ namespace nana{
 #if defined(NANA_WINDOWS)
 			POINT pos = {x, y};
 			return reinterpret_cast<native_window_type>(::WindowFromPoint(pos));
-#elif defined(NANA_X11)
+#elif defined(NANA_X11) || defined(NANA_COCOA)
 			nana::detail::platform_scope_guard psg;
 
 			Window root = restrict::spec.root_window();
@@ -1761,3 +1759,7 @@ namespace nana{
 	//end struct native_interface
 	}//end namespace detail
 }//end namespace nana
+
+#endif // !NANA_COCOA
+
+#endif // !NANA_COCOA

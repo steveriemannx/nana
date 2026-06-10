@@ -1,6 +1,15 @@
 #ifndef NANA_DETAIL_MSG_PACKET_HPP
 #define NANA_DETAIL_MSG_PACKET_HPP
+#if defined(NANA_COCOA)
+// Cocoa: forward-declare types to avoid X11/Cocoa header conflict
+typedef struct _XDisplay Display;
+typedef unsigned long XID;
+typedef XID Window;
+typedef XID Pixmap;
+// Use void* for event data on Cocoa (stores NSEvent* or nullptr)
+#else
 #include <X11/Xlib.h>
+#endif
 #include <vector>
 #include <nana/deploy.hpp>
 #include <nana/filesystem/filesystem.hpp>
@@ -11,9 +20,9 @@ namespace detail
 {
 	enum class propagation_chain
 	{
-		exit,	//Exit the chain 
-		stop,	//Stop propagating
-		pass 	//propagate
+		exit,
+		stop,
+		pass
 	};
 
 	struct msg_packet_tag
@@ -22,12 +31,16 @@ namespace detail
 		pkt_family kind;
 		union
 		{
+#if defined(NANA_COCOA)
+			void* xevent_ptr;  // NSEvent* on Cocoa
+#else
 			XEvent xevent;
+#endif
 
-			Window packet_window; //Avaiable if the packet is not kind_xevent
+			uintptr_t packet_window;
 			struct mouse_drop_tag
 			{
-				Window window;
+				uintptr_t window;
 				int x;
 				int y;
 				std::vector<std::filesystem::path> * files;
@@ -37,4 +50,3 @@ namespace detail
 }//end namespace detail
 }//end namespace nana
 #endif
-

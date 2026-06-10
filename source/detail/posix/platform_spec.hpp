@@ -13,7 +13,7 @@
  *	This file should not be included by any header files.
  */
 
-#if defined(NANA_POSIX)
+#if defined(NANA_POSIX) && defined(NANA_X11)
 
 #ifndef NANA_DETAIL_PLATFORM_SPEC_HPP
 #define NANA_DETAIL_PLATFORM_SPEC_HPP

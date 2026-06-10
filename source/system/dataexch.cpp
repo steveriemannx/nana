@@ -23,6 +23,7 @@
 #	include <nana/gui/detail/bedrock.hpp>
 #	include "../detail/platform_spec_selector.hpp"
 #	include "../gui/detail/basic_window.hpp"
+#if !defined(NANA_COCOA)
 #endif
 
 namespace nana{ namespace system{
@@ -289,3 +290,5 @@ namespace nana{ namespace system{
 }//end namespace system
 }//end namespace nana
 
+
+#endif // !NANA_COCOA

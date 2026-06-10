@@ -54,7 +54,7 @@ namespace detail
 		static window_result create_window(native_window_type, bool nested, const rectangle&, const appearance&);
 		static native_window_type create_child_window(native_window_type, const rectangle&);
 
-#if defined(NANA_X11)
+#if (defined(NANA_X11) || defined(NANA_COCOA))
 		static void set_modal(native_window_type);
 #endif
 		static void enable_dropfiles(native_window_type, bool);

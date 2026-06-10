@@ -21,7 +21,7 @@
 
 #include <map>
 
-#ifdef NANA_X11
+#if defined(NANA_X11) && !defined(NANA_COCOA)
 #	include <atomic>
 #endif
 
@@ -80,7 +80,7 @@ namespace nana{
 			root_misc(basic_window * wd, unsigned width, unsigned height);
 			~root_misc();
 
-#ifdef NANA_X11
+#if defined(NANA_X11) && !defined(NANA_COCOA)
 			struct x11msg_confirm
 			{
 				std::atomic<std::size_t> config{ 0 };

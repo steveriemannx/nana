@@ -16,7 +16,7 @@
 
 #include "platform_spec_selector.hpp"
 #include "platform_abstraction.hpp"
-#if defined(NANA_POSIX) && defined(NANA_X11)
+#if defined(NANA_POSIX) && defined(NANA_X11) && !defined(NANA_COCOA) && !defined(NANA_COCOA)
 
 #include <nana/push_ignore_diagnostic>
 

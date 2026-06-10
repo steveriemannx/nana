@@ -28,7 +28,7 @@
 #if defined(NANA_WINDOWS)
 #include <windows.h>
 #elif defined(NANA_POSIX)
-#include "../detail/posix/platform_spec.hpp"
+#include "../detail/platform_spec_selector.hpp"
 #include <nana/system/platform.hpp>
 #endif
 

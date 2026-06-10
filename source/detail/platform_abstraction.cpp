@@ -1,5 +1,6 @@
 #include "platform_abstraction.hpp"
 #include <set>
+#include <map>
 #include <nana/deploy.hpp>
 #include "../paint/truetype.hpp"
 #ifdef _nana_std_has_string_view
@@ -145,6 +146,8 @@ IsWindows8OrGreater()
 #endif // NTDDI_VERSION
 
 #endif // defined(__midl)
+#elif defined(NANA_COCOA)
+#	include "cocoa/platform_spec.hpp"
 #else
 #	include "posix/platform_spec.hpp"
 #	include <fontconfig/fontconfig.h>
@@ -593,7 +596,7 @@ namespace nana
 	{
 		std::shared_ptr<font_interface> font;
 
-#ifdef NANA_X11
+#if defined(NANA_X11) || defined(NANA_COCOA)
 		std::map<std::string, std::size_t> fontconfig_counts;
 #endif
 #ifdef NANA_USE_XFT
@@ -862,6 +865,10 @@ namespace nana
 		lf.lfStrikeOut = fs.strike_out;
 
 		auto fd = ::CreateFontIndirect(&lf);
+#elif defined(NANA_COCOA)
+		// Cocoa: font creation in platform_spec_cocoa.mm
+		(void)font_family; (void)size_pt; (void)fs; (void)ttf;
+		return {};
 #elif defined(NANA_X11)
 		auto disp = ::nana::detail::platform_spec::instance().open_display();
 #	ifdef NANA_USE_XFT
@@ -901,7 +908,7 @@ namespace nana
 		XFontSet fd = ::XCreateFontSet(display_, const_cast<char*>(pat_str.c_str()), &missing_list, &missing_count, &defstr);
 #	endif
 #endif
-
+#if defined(NANA_X11)
 		if (fd)
 		{
 #ifdef NANA_USE_XFT
@@ -911,6 +918,7 @@ namespace nana
 			return std::make_shared<internal_font>(std::move(ttf), std::move(font_family), size_pt, fs, reinterpret_cast<native_font_type>(fd));
 #endif
 		}
+#endif // NANA_X11
 		return{};
 	}
 
@@ -937,7 +945,7 @@ namespace nana
 			::AddFontResourceEx(ttf.wstring().c_str(), FR_PRIVATE, nullptr);
 		else
 			::RemoveFontResourceEx(ttf.wstring().c_str(), FR_PRIVATE, nullptr);
-#else
+#elif defined(NANA_X11)
 		auto & fc = platform_storage().fontconfig_counts;
 		if(try_add)
 		{
@@ -968,7 +976,7 @@ namespace nana
 		auto dots = static_cast<unsigned>(::GetDeviceCaps(hdc, (x_requested ? LOGPIXELSX : LOGPIXELSY)));
 		::ReleaseDC(nullptr, hdc);
 		return dots;
-#else
+#elif defined(NANA_X11)
 		auto & spec = ::nana::detail::platform_spec::instance();
 		auto disp = spec.open_display();
 		auto screen = ::XDefaultScreen(disp);

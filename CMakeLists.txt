@@ -25,7 +25,7 @@ cmake_minimum_required(VERSION 3.12  FATAL_ERROR)
 project(nana VERSION      1.7.3
         DESCRIPTION "C++ GUI library"
         HOMEPAGE_URL http://nanapro.org
-        LANGUAGES CXX         )
+        LANGUAGES CXX OBJCXX   )
 
 #######################     Main setting of Nana targets, sources and installs    #####################
 
@@ -60,6 +60,7 @@ set(NANA_SOURCE_DIR         ${CMAKE_CURRENT_LIST_DIR}/source)
 set(NANA_SOURCE_SUBDIRS     /.
                             /detail
                             /detail/posix
+                            /detail/cocoa
                             /filesystem
                             /gui
                             /gui/detail

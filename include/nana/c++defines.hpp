@@ -18,6 +18,7 @@
  *	- NANA_LINUX
  *	- NANA_MACOS
  *	- NANA_X11
+ *	- NANA_COCOA
  *
  *	External libraries:
  *	- NANA_LIBPNG, USE_LIBPNG_FROM_OS
@@ -89,11 +90,11 @@
 	#endif // MINGW
 
 #elif defined(__APPLE__) || defined(APPLE)	//Mac OS X
-	//Symbols for MACOS
+	//Symbols for MACOS (Cocoa backend; define NANA_XQUARTZ for legacy XQuartz/X11)
 	#define NANA_MACOS
 	#define NANA_POSIX
-	#define NANA_X11
-	typedef unsigned long thread_t;
+	#define NANA_COCOA
+#include <mach/mach_types.h>
 #elif defined(__FreeBSD__)
 	#define NANA_POSIX
 	#define NANA_X11

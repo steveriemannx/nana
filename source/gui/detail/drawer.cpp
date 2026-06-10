@@ -17,7 +17,7 @@
 #include <nana/gui/detail/drawer.hpp>
 #include "dynamic_drawing_object.hpp"
 
-#if defined(NANA_X11)
+#if defined(NANA_X11) && !defined(NANA_COCOA)
 	#include "../../detail/posix/platform_spec.hpp"
 #endif
 

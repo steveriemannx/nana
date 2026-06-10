@@ -45,7 +45,7 @@ namespace nana
 
 namespace API
 {
-#ifdef NANA_X11
+#if defined(NANA_X11)
 	//Some platform specific functions for X11
 	namespace x11
 	{
