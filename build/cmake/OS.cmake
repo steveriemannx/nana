@@ -69,6 +69,7 @@ endif(UNIX)
 # Cocoa backend: exclude X11-specific source files, include Cocoa stubs
 if(APPLE)
     set(NANA_EXCLUDE_SOURCES
+        "${NANA_SOURCE_DIR}/paint/detail/native_paint_interface.cpp"
         "${NANA_SOURCE_DIR}/gui/detail/native_window_interface.cpp"
         "${NANA_SOURCE_DIR}/paint/detail/native_paint_interface.cpp"
         "${NANA_SOURCE_DIR}/paint/graphics.cpp"
@@ -78,6 +79,7 @@ if(APPLE)
     endforeach()
     # Add Cocoa-specific sources
     target_sources(nana PRIVATE
+        "${NANA_SOURCE_DIR}/paint/detail/native_paint_interface_cocoa.mm"
         "${NANA_SOURCE_DIR}/gui/detail/native_window_interface_cocoa.mm"
     )
 endif()
