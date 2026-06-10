@@ -78,6 +78,6 @@ if(APPLE)
     endforeach()
     # Add Cocoa-specific sources
     target_sources(nana PRIVATE
-        "${NANA_SOURCE_DIR}/gui/detail/native_window_interface_cocoa.cpp"
+        "${NANA_SOURCE_DIR}/gui/detail/native_window_interface_cocoa.mm"
     )
 endif()
