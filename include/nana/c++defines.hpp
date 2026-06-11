@@ -18,7 +18,7 @@
  *	- NANA_LINUX
  *	- NANA_MACOS
  *	- NANA_X11
- *	- NANA_COCOA
+ *	- NANA_MACOS
  *
  *	External libraries:
  *	- NANA_LIBPNG, USE_LIBPNG_FROM_OS
@@ -82,7 +82,6 @@
 // Select platform  ......
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)	//Microsoft Windows
 	#define NANA_WINDOWS
-	typedef unsigned long thread_t;
 
 	// MINGW ...
 	#if defined(__MINGW32__) || defined(__MINGW64__) || defined(MINGW)
@@ -90,20 +89,19 @@
 	#endif // MINGW
 
 #elif defined(__APPLE__) || defined(APPLE)	//Mac OS X
-	//Symbols for MACOS (Cocoa backend; define NANA_XQUARTZ for legacy XQuartz/X11)
+		//Symbols for MACOS (native Cocoa backend)
 	#define NANA_MACOS
 	#define NANA_POSIX
-	#define NANA_COCOA
 #include <mach/mach_types.h>
 #elif defined(__FreeBSD__)
-	#define NANA_POSIX
-	#define NANA_X11
-	typedef unsigned long thread_t;
+		#define NANA_POSIX
+		#define NANA_X11
+		typedef unsigned long thread_t;
 #elif (defined(linux) || defined(__linux) || defined(__linux__) || defined(__GNU__) || defined(__GLIBC__)) && !defined(_CRAYC)	//Linux
 	#define NANA_LINUX
 	#define NANA_POSIX
-	#define NANA_X11
-	typedef unsigned long thread_t;
+		#define NANA_X11
+		typedef unsigned long thread_t;
 #else
 	static_assert(false, "Only Windows and Linux are supported now (Mac OS and BSD are experimental)");
 #endif

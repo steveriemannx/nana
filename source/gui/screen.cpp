@@ -16,6 +16,15 @@
 #include <nana/gui/programming_interface.hpp>
 #if defined(NANA_WINDOWS)
 	#include <windows.h>
+#elif defined(NANA_MACOS)
+extern "C" {
+	struct nana_macos_screen_info {
+		int x, y, width, height;
+		bool is_primary;
+	};
+	int nana_macos_get_screen_count();
+	void nana_macos_get_screen_info(int index, nana_macos_screen_info* info);
+}
 #endif
 
 namespace nana
@@ -109,6 +118,21 @@ namespace nana
 				disp_cont->emplace_back(disp_cont->size(), mi);
 
 			return TRUE;
+		}
+#elif defined(NANA_MACOS)
+		void load_monitors()
+		{
+			displays.clear();
+			int count = nana_macos_get_screen_count();
+			for (int i = 0; i < count; i++)
+			{
+				nana_macos_screen_info info;
+				nana_macos_get_screen_info(i, &info);
+				displays.emplace_back(static_cast<std::size_t>(i),
+					rectangle{info.x, info.y,
+						static_cast<unsigned>(info.width),
+						static_cast<unsigned>(info.height)});
+			}
 		}
 #else
 		void load_monitors()

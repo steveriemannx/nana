@@ -146,8 +146,8 @@ IsWindows8OrGreater()
 #endif // NTDDI_VERSION
 
 #endif // defined(__midl)
-#elif defined(NANA_COCOA)
-#	include "cocoa/platform_spec.hpp"
+#elif defined(NANA_MACOS)
+#	include "macos/platform_spec.hpp"
 #	include <CoreText/CoreText.h>
 #	include <CoreGraphics/CoreGraphics.h>
 #else
@@ -598,7 +598,7 @@ namespace nana
 	{
 		std::shared_ptr<font_interface> font;
 
-#if defined(NANA_X11) || defined(NANA_COCOA)
+#if defined(NANA_X11) || defined(NANA_MACOS)
 		std::map<std::string, std::size_t> fontconfig_counts;
 #endif
 #ifdef NANA_USE_XFT
@@ -867,7 +867,7 @@ namespace nana
 		lf.lfStrikeOut = fs.strike_out;
 
 		auto fd = ::CreateFontIndirect(&lf);
-#elif defined(NANA_COCOA)
+#elif defined(NANA_MACOS)
 		CTFontRef fd = nullptr;
 		if (font_family.empty()) font_family = "Helvetica";
 		CFStringRef fam = CFStringCreateWithCString(nullptr, font_family.c_str(), kCFStringEncodingUTF8);

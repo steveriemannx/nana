@@ -426,6 +426,7 @@ namespace nana
 		return *this;
 	}
 
+#if !defined(NANA_MACOS)
 	msgbox::pick_t msgbox::show() const
 	{
 #if defined(NANA_WINDOWS)
@@ -495,6 +496,7 @@ namespace nana
 #endif
 		return pick_yes;
 	}
+#endif // !defined(NANA_MACOS)
 	//end class msgbox
 
 

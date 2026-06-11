@@ -1,12 +1,14 @@
 /*
  *	Native Paint Interface — Cocoa (CoreGraphics) Backend
  */
-#if defined(NANA_COCOA)
+#if defined(NANA_MACOS)
 #include "../../detail/platform_spec_selector.hpp"
 #include <nana/paint/detail/native_paint_interface.hpp>
 #include <nana/paint/pixel_buffer.hpp>
 #include <nana/gui/layout_utility.hpp>
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreText/CoreText.h>
+#include "../../detail/platform_abstraction.hpp"
 
 namespace nana { namespace paint { namespace detail {
 
@@ -79,8 +81,11 @@ nana::size real_text_extent_size(drawable_type dw, const wchar_t* text, std::siz
     CFStringRef str = CFStringCreateWithBytes(nullptr, (const UInt8*)text,
         len * sizeof(wchar_t), kCFStringEncodingUTF32LE, false);
     if (!str) return {};
-    CTFontRef font = (CTFontRef)(dw->font ? dw->font->native_handle() : nullptr);
-    if (!font) font = (CTFontRef)dw->font->native_handle();
+    auto def = platform_abstraction::default_font(nullptr);
+    CTFontRef font = (CTFontRef)(dw->font ? dw->font->native_handle() : 
+                                  (def ? def->native_handle() : nullptr));
+    if (!font) font = CTFontCreateWithName(CFSTR("Helvetica"), 12.0, nullptr);
+    if (!font) font = CTFontCreateWithName(CFSTR("LucidaGrande"), 12.0, nullptr);
     if (!font) { CFRelease(str); return {}; }
     CFAttributedStringRef astr = CFAttributedStringCreate(nullptr, str, nullptr);
     CTLineRef line = CTLineCreateWithAttributedString(astr);
@@ -108,6 +113,7 @@ nana::size text_extent_size(drawable_type dw, const char* text, std::size_t len)
 
 nana::size text_extent_size(drawable_type dw, const wchar_t* text, std::size_t len) {
     if (!dw || !text || !len) return {};
+    static int dbg2=0; if(++dbg2<=20) fprintf(stderr, "[NANA] text_extent_size: len=%zu\n", len);
     nana::size ext = real_text_extent_size(dw, text, len);
     int tabs = 0;
     for (const wchar_t* p = text; p < text + len; ++p) if (*p == '\t') ++tabs;
@@ -118,27 +124,34 @@ nana::size text_extent_size(drawable_type dw, const wchar_t* text, std::size_t l
 void draw_string(drawable_type dw, const nana::point& pos, const wchar_t* str, std::size_t len) {
     if (!dw || !dw->context || !str || !len) return;
     CGContextRef ctx = (CGContextRef)dw->context;
-    CGContextSaveGState(ctx);
-    // Flip coordinate system for text
-    CGAffineTransform flip = CGAffineTransformMake(1, 0, 0, -1, 0, 0);
-    CGContextSetTextMatrix(ctx, flip);
+    // CTM is flipped (top-left). Text matrix also flipped (set in make()).
+    // Use nana coords directly.
 
     CFStringRef cfs = CFStringCreateWithBytes(nullptr, (const UInt8*)str,
         len * sizeof(wchar_t), kCFStringEncodingUTF32LE, false);
-    if (!cfs) { CGContextRestoreGState(ctx); return; }
+    if (!cfs) return;
 
     CTFontRef font = (CTFontRef)(dw->font ? dw->font->native_handle() : nullptr);
-    if (!font) { CFRelease(cfs); CGContextRestoreGState(ctx); return; }
+    bool created_font = false;
+    if (!font) {
+        auto def = platform_abstraction::default_font(nullptr);
+        if (def) font = (CTFontRef)def->native_handle();
+    }
+    if (!font) { font = CTFontCreateWithName(CFSTR("Helvetica"), 12.0, nullptr); created_font = true; }
+    if (!font) { font = CTFontCreateWithName(CFSTR("LucidaGrande"), 12.0, nullptr); created_font = true; }
+    if (!font) { CFRelease(cfs); return; }
 
     CFAttributedStringRef astr = CFAttributedStringCreate(nullptr, cfs, nullptr);
     CTLineRef line = CTLineCreateWithAttributedString(astr);
 
-    CGFloat y = pos.y + CTFontGetAscent(font);
-    CGContextSetTextPosition(ctx, pos.x, -y);
+    // pos.y = distance from top. In flipped CTM+textMatrix, text draws right-side-up.
+    // Baseline at pos.y + ascent from top.
+    CGFloat baseline = pos.y + CTFontGetAscent(font);
+    CGContextSetTextPosition(ctx, pos.x, baseline);
     CTLineDraw(line, ctx);
 
     CFRelease(line); CFRelease(astr); CFRelease(cfs);
-    CGContextRestoreGState(ctx);
+    if (created_font) CFRelease(font);
 }
 
 }}} // namespace

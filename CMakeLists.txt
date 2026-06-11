@@ -60,7 +60,7 @@ set(NANA_SOURCE_DIR         ${CMAKE_CURRENT_LIST_DIR}/source)
 set(NANA_SOURCE_SUBDIRS     /.
                             /detail
                             /detail/posix
-                            /detail/cocoa
+                            /detail/macos
                             /filesystem
                             /gui
                             /gui/detail

@@ -27,6 +27,13 @@
 #include <algorithm>
 #include <iterator>
 
+#if defined(NANA_MACOS)
+extern "C" {
+void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const char*);
+void* nana_macos_create_native_label(void*, void*, int, int, unsigned, unsigned, const char*);
+}
+#endif
+
 #if defined(STD_THREAD_NOT_SUPPORTED)
 #include <nana/std_mutex.hpp>
 #else
@@ -856,8 +863,16 @@ namespace detail
 					native_interface::move_window(wd->root, root_r.x, root_r.y);
 			}
 
-			return (moved || size_changed);
-		}
+	#if defined(NANA_MACOS)
+			// Update native Cocoa control frame after move/size
+			if (category::flags::root != wd->other.category) {
+				nana_macos_update_native_control((void*)wd,
+					wd->pos_root.x, wd->pos_root.y,
+					wd->dimension.width, wd->dimension.height, nullptr);
+			}
+#endif
+		return (moved || size_changed);
+	}
 
 		//size
 		//@brief: Size a window

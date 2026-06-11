@@ -428,7 +428,7 @@ namespace nana
 				flags.ignore_mouse_focus	= false;
 				flags.space_click_enabled = false;
 
-				visible = false;
+				visible = (category::flags::root != other.category);
 
 				effect.edge_nimbus = effects::edge_nimbus::none;
 				effect.bground = nullptr;

@@ -22,7 +22,7 @@
 	#include <windows.h>
 #elif defined(NANA_X11)
 	#include <X11/Xlib.h>
-#if !defined(NANA_COCOA)
+#if !defined(NANA_MACOS)
 #endif
 
 #include "../detail/platform_abstraction.hpp"
@@ -1598,4 +1598,4 @@ namespace paint
 }//end namespace paint
 }//end namespace nana
 
-#endif // !NANA_COCOA
+#endif // !NANA_MACOS

@@ -1,6 +1,6 @@
 #ifndef NANA_DETAIL_MSG_PACKET_HPP
 #define NANA_DETAIL_MSG_PACKET_HPP
-#if defined(NANA_COCOA)
+#if defined(NANA_MACOS)
 // Cocoa: forward-declare types to avoid X11/Cocoa header conflict
 typedef struct _XDisplay Display;
 typedef unsigned long XID;
@@ -31,7 +31,7 @@ namespace detail
 		pkt_family kind;
 		union
 		{
-#if defined(NANA_COCOA)
+#if defined(NANA_MACOS)
 			void* xevent_ptr;  // NSEvent* on Cocoa
 #else
 			XEvent xevent;

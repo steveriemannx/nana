@@ -888,6 +888,10 @@ namespace API
 	void refresh_window(window wd)
 	{
 		restrict::wd_manager().update(wd, true, false);
+		// Ensure the native root window display is refreshed.
+		// On platforms like Cocoa, child widget updates don't trigger
+		// a display refresh, so we explicitly refresh the root window.
+		::nana::detail::native_interface::refresh_window(wd->root);
 	}
 
 	void refresh_window_tree(window wd)

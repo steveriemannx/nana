@@ -4,7 +4,7 @@
  *	Copyright(C) 2003-2024 Jinhao(cnjinhao@hotmail.com)
  *
  *	Distributed under the Boost Software License, Version 1.0.
- *	@file: nana/detail/cocoa/msg_dispatcher.hpp
+ *	@file: nana/detail/macos/msg_dispatcher.hpp
  */
 
 #ifndef NANA_DETAIL_COCOA_MSG_DISPATCHER_HPP
@@ -39,8 +39,8 @@ namespace detail
 	public:
 		typedef msg_packet_tag	msg_packet;
 		typedef void (*timer_proc_type)(thread_t tid);
-		typedef void (*event_proc_type)(Display*, msg_packet_tag&);
-		typedef int (*event_filter_type)(Display* /*NSEvent*/, msg_packet_tag&);
+		typedef void (*event_proc_type)(void*, msg_packet_tag&);
+		typedef int (*event_filter_type)(void* /*NSEvent*/, msg_packet_tag&);
 
 		typedef std::list<msg_packet_tag> msg_queue_type;
 

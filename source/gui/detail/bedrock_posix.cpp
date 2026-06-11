@@ -11,7 +11,7 @@
  */
 
 #include "../../detail/platform_spec_selector.hpp"
-#if defined(NANA_POSIX) && defined(NANA_X11) && !defined(NANA_COCOA) && !defined(NANA_COCOA)
+#if defined(NANA_POSIX) && defined(NANA_X11) && !defined(NANA_MACOS)
 #include <nana/gui/detail/event_code.hpp>
 #include <nana/system/platform.hpp>
 #include <nana/gui/detail/native_window_interface.hpp>

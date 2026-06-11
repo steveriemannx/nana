@@ -12,8 +12,17 @@
 
 #include <nana/gui/widgets/button.hpp>
 #include <nana/gui/detail/widget_content_measurer_interface.hpp>
+#include "../detail/basic_window.hpp"
 
 #include <nana/paint/text_renderer.hpp>
+
+#if defined(NANA_MACOS)
+extern "C" {
+void* nana_macos_create_native_button(void*, void*, int, int, unsigned, unsigned, const char*);
+void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const char*);
+void nana_macos_remove_native_control(void*);
+}
+#endif
 
 namespace nana{	namespace drawerbase
 {
@@ -508,6 +517,16 @@ namespace nana{	namespace drawerbase
 
 			void button::_m_complete_creation()
 			{
+#if defined(NANA_MACOS)
+				auto* wd = reinterpret_cast<detail::basic_window*>(handle());
+				if (wd && wd->root_widget && wd->root_widget->root) {
+					std::string cap = to_utf8(caption_native());
+					nana_macos_create_native_button(wd->root_widget->root, wd,
+						wd->pos_root.x, wd->pos_root.y,
+						wd->dimension.width, wd->dimension.height,
+						cap.c_str());
+				}
+#endif
 				events().shortkey.connect_unignorable([this](const arg_keyboard&)
 				{
 					get_drawer_trigger().emit_click();

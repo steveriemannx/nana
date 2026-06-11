@@ -15,6 +15,10 @@
 #include <nana/push_ignore_diagnostic>
 
 #include <sstream>
+#include <nana/gui/basis.hpp>
+#include <nana/charset.hpp>
+#include <nana/paint/image.hpp>
+#include <nana/gui/filebox.hpp>
 
 namespace nana
 {

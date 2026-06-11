@@ -13,7 +13,15 @@
 
 #include "platform_spec_selector.hpp"
 #include "platform_abstraction.hpp"
-#if defined(NANA_POSIX) && defined(NANA_COCOA)
+#if defined(NANA_POSIX) && defined(NANA_MACOS)
+
+// Minimal NSApplication delegate for Dock quit (Cmd+Q) support
+@interface NanaAppDelegate : NSObject <NSApplicationDelegate>
+@end
+@implementation NanaAppDelegate
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender { return YES; }
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender { return NSTerminateNow; }
+@end
 
 #include <nana/push_ignore_diagnostic>
 
@@ -29,7 +37,7 @@
 #include <errno.h>
 #include <sstream>
 
-#include "cocoa/msg_dispatcher.hpp"
+#include "macos/msg_dispatcher.hpp"
 #include "../gui/detail/basic_window.hpp"
 
 namespace nana
@@ -211,25 +219,21 @@ namespace detail
 
 	drawable_impl_type::~drawable_impl_type()
 	{
-		if(context && pixmap == nullptr)
-		{
-			// Window-backed context - release
-			CGContextRelease(reinterpret_cast<CGContextRef>(context));
-			context = nullptr;
-		}
-		if(pixmap)
-		{
-			// Offscreen bitmap context
-			CGContextRelease(reinterpret_cast<CGContextRef>(context));
+		// pixmap and context are the same CGContextRef in Cocoa backend.
+		if(pixmap) {
 			CGContextRelease(reinterpret_cast<CGContextRef>(pixmap));
-			context = nullptr;
 			pixmap = nullptr;
+			context = nullptr;
+		} else if(context) {
+			CGContextRelease(reinterpret_cast<CGContextRef>(context));
+			context = nullptr;
 		}
 	}
 
 	void drawable_impl_type::set_color(const ::nana::color& clr)
 	{
 		bgcolor_rgb = (clr.px_color().value & 0xFFFFFF);
+		update_color();
 	}
 
 	void drawable_impl_type::set_text_color(const ::nana::color& clr)
@@ -291,6 +295,12 @@ namespace detail
 		if ([NSApp isRunning] == NO)
 		{
 			[NSApplication sharedApplication];
+			[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+
+			// Set up a minimal delegate so Dock quit (Cmd+Q) works
+			static NanaAppDelegate* appDel = nil;
+			if (!appDel) { appDel = [[NanaAppDelegate alloc] init]; }
+			[NSApp setDelegate:appDel];
 		}
 
 		const char * langstr = getenv("LC_CTYPE");
@@ -743,4 +753,4 @@ namespace detail
 }//end namespace nana
 
 #include <nana/pop_ignore_diagnostic>
-#endif // NANA_POSIX && NANA_COCOA
+#endif // NANA_POSIX && NANA_MACOS

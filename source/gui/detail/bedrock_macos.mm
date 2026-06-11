@@ -8,7 +8,7 @@
  */
 
 #include "../../detail/platform_spec_selector.hpp"
-#if defined(NANA_POSIX) && defined(NANA_COCOA)
+#if defined(NANA_POSIX) && defined(NANA_MACOS)
 #include <nana/gui/detail/event_code.hpp>
 #include <nana/system/platform.hpp>
 #include <nana/gui/detail/native_window_interface.hpp>
@@ -49,7 +49,7 @@ namespace detail
 	};
 
 	void timer_proc(thread_t);
-	void window_proc_dispatcher(Display*, nana::detail::msg_packet_tag&);
+	void window_proc_dispatcher(void*, nana::detail::msg_packet_tag&);
 	void window_proc_for_packet(void*, nana::detail::msg_packet_tag&);
 	void window_proc_for_nsevent(void*, void* /*NSEvent*/, msg_packet_tag&);
 
@@ -544,7 +544,15 @@ namespace detail
 			}
 		}
 
-		nana::detail::platform_spec::instance().msg_dispatch(condition_wd ? condition_wd->root : 0);
+		// Manual event loop — processes NSEvents and internal messages
+		while (context->window_count > 0) {
+			@autoreleasepool {
+				NSEvent* ev = [NSApp nextEventMatchingMask:NSEventMaskAny
+					untilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]
+					inMode:NSDefaultRunLoopMode dequeue:YES];
+				if (ev) [NSApp sendEvent:ev];
+			}
+		}
 
 		if(owner_native)
 		{
@@ -624,4 +632,4 @@ namespace detail
 	}
 }//end namespace detail
 }//end namespace nana
-#endif // NANA_POSIX && NANA_COCOA
+#endif // NANA_POSIX && NANA_MACOS

@@ -17,7 +17,7 @@
 #include <nana/gui/detail/drawer.hpp>
 #include "dynamic_drawing_object.hpp"
 
-#if defined(NANA_X11) && !defined(NANA_COCOA)
+#if defined(NANA_X11) && !defined(NANA_MACOS)
 	#include "../../detail/posix/platform_spec.hpp"
 #endif
 
@@ -569,7 +569,14 @@ namespace nana
 							static_cast<unsigned>(action.window->dimension.height + (pixels << 1))
 						);
 
-						graph->paste(root_wd->root, erase_r, erase_r.x, erase_r.y);
+	#if defined(NANA_MACOS)
+					{
+						nana::rectangle src(erase_r.x - root_wd->pos_root.x, erase_r.y - root_wd->pos_root.y, erase_r.width, erase_r.height);
+						root_wd->drawer.graphics.paste(src, *graph, erase_r.x, erase_r.y);
+					}
+#else
+					graph->paste(root_wd->root, erase_r, erase_r.x, erase_r.y);
+#endif
 					}
 				}
 			}
@@ -581,7 +588,12 @@ namespace nana
 				{
 					if (update_area)
 						::nana::overlap(*update_area, rectangle(vr), vr);
-					wd->root_graph->paste(wd->root, vr, vr.x, vr.y);
+#if defined(NANA_MACOS)
+						// maproot() in refresh_tree already composited children.
+						// Skipping to avoid overwriting with root background.
+#else
+						wd->root_graph->paste(wd->root, vr, vr.x, vr.y);
+#endif
 				}
 			}
 

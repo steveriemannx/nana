@@ -33,7 +33,7 @@
 #	include <fstream>
 #endif
 
-#ifndef NANA_COCOA
+#if !defined(NANA_MACOS)
 namespace nana
 {
 	namespace detail
@@ -1203,4 +1203,4 @@ using win32_dropdata = win32com_iunknown<win32_dropdata_impl, IID_IDataObject>;
 		real_data_->files.emplace_back(std::move(path));
 	}
 }//end namespace nana
-#endif // !NANA_COCOA
+#endif // !NANA_MACOS

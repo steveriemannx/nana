@@ -5,14 +5,14 @@
  *
  *	Distributed under the Boost Software License, Version 1.0.
  *
- *	@file: nana/detail/cocoa/platform_spec.hpp
+ *	@file: nana/detail/macos/platform_spec.hpp
  *
  *	This file provides the Cocoa backend platform specification for macOS.
  *	Uses forward declarations instead of X11 headers to avoid conflicts
  *	with Cocoa frameworks.
  */
 
-#if defined(NANA_POSIX) && defined(NANA_COCOA)
+#if defined(NANA_POSIX) && defined(NANA_MACOS)
 
 #ifndef NANA_DETAIL_COCOA_PLATFORM_SPEC_HPP
 #define NANA_DETAIL_COCOA_PLATFORM_SPEC_HPP
@@ -116,7 +116,7 @@ namespace detail
 	public:
 		int error_code{0};
 		typedef void (*timer_proc_type)(thread_t tid);
-		typedef void (*event_proc_type)(Display*, msg_packet_tag&);
+		typedef void (*event_proc_type)(void*, msg_packet_tag&);
 		typedef ::nana::event_code event_code;
 		typedef ::nana::native_window_type native_window_type;
 
