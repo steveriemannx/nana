@@ -159,12 +159,19 @@ namespace nana{	namespace drawerbase
 
 			if (false == cite_.draw(graph, attr_.bgcolor, attr_.fgcolor, ::nana::rectangle{ graph.size() }, e_state))
 			{
+#ifdef NANA_MACOS
+				// On macOS, do not draw custom background/border.
+				// The native NSButton provides the rounded bezel.
+				// Title is drawn by _m_draw_title below.
+				;
+#else
 				if (API::is_transparent_background(*wdg_))
 					API::dev::copy_transparent_background(*wdg_, graph);
 				else
 					_m_draw_background(graph);
 
 				_m_draw_border(graph);
+#endif
 			}
 			_m_draw_title(graph, eb);
 		}

@@ -89,7 +89,7 @@ nana::size real_text_extent_size(drawable_type dw, const wchar_t* text, std::siz
     if (!font) { CFRelease(str); return {}; }
     CFAttributedStringRef astr = CFAttributedStringCreate(nullptr, str, nullptr);
     CTLineRef line = CTLineCreateWithAttributedString(astr);
-    CGRect bounds = CTLineGetBoundsWithOptions(line, kCTLineBoundsUseGlyphPathBounds);
+    CGRect bounds = CTLineGetBoundsWithOptions(line, 0);  // use typographic bounds (includes space advance width)
     CGFloat w = bounds.size.width;
     CGFloat h = CTFontGetAscent(font) + CTFontGetDescent(font);
     CFRelease(line); CFRelease(astr); CFRelease(str);

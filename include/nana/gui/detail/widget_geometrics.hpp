@@ -45,7 +45,7 @@ namespace nana
 		virtual ~widget_geometrics() = default;
 
 		color_proxy activated{ static_cast<color_rgb>(0x60C8FD) };
-		color_proxy background{colors::button_face};
+		color_proxy background{colors::white};
 		color_proxy foreground{colors::black};
 	};
 }
