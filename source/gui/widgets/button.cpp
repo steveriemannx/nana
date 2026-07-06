@@ -550,6 +550,17 @@ namespace nana{	namespace drawerbase
 					API::register_shortkey(handle(), shortkey);
 
 				base_type::_m_caption(std::move(text));
+
+#if defined(NANA_MACOS)
+					auto* wd = reinterpret_cast<detail::basic_window*>(handle());
+					if (wd) {
+						std::string cap = to_utf8(caption_native());
+						nana_macos_update_native_control(wd,
+							wd->pos_root.x, wd->pos_root.y,
+							wd->dimension.width, wd->dimension.height,
+							cap.c_str());
+					}
+#endif
 			}
 		//end class button
 }//end namespace nana
