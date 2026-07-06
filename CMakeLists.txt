@@ -22,12 +22,21 @@
 # cmake 3.12 have more better modern c++ support
 
 cmake_minimum_required(VERSION 3.12  FATAL_ERROR)
+if(APPLE)
+    set(NANA_PROJECT_LANGUAGES CXX OBJCXX)
+else()
+    set(NANA_PROJECT_LANGUAGES CXX)
+endif()
+
 project(nana VERSION      1.7.3
         DESCRIPTION "C++ GUI library"
         HOMEPAGE_URL http://nanapro.org
-        LANGUAGES CXX OBJCXX   )
+        LANGUAGES ${NANA_PROJECT_LANGUAGES}   )
 
 #######################     Main setting of Nana targets, sources and installs    #####################
+
+# Enable position-independent code (required to link nana into a shared library like libnanawrap)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_library(nana)
 add_library(nana::nana ALIAS nana)
@@ -82,6 +91,11 @@ endif()
 foreach(subdir ${NANA_SOURCE_SUBDIRS})
     aux_source_directory(${NANA_SOURCE_DIR}${subdir} SOURCES) # todo: use GLOB to add headers too ??
 endforeach()
+
+# On non-Apple platforms, exclude Objective-C++ macOS-specific sources
+if(NOT APPLE)
+    list(FILTER SOURCES EXCLUDE REGEX ".*_macos\\.mm$")
+endif()
 
 target_sources(nana PRIVATE ${SOURCES})
 

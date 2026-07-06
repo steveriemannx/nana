@@ -746,9 +746,8 @@ namespace nana
 	{
 		auto & r = platform_storage();
 
-		if (r.font.use_count() > 1)
-			throw std::runtime_error("platform_abstraction is disallowed to shutdown");
-
+		// During exit, force cleanup even if lingering references exist.
+		// Throwing here would call std::terminate in static destructor context.
 		r.font.reset();
 
 		delete data::storage;
