@@ -866,6 +866,8 @@ namespace nana
 		lf.lfStrikeOut = fs.strike_out;
 
 		auto fd = ::CreateFontIndirect(&lf);
+		if (fd)
+			return std::make_shared<internal_font>(std::move(ttf), std::move(font_family), size_pt, fs, reinterpret_cast<native_font_type>(fd));
 #elif defined(NANA_MACOS)
 		CTFontRef fd = nullptr;
 		if (font_family.empty()) font_family = "Helvetica";

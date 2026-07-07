@@ -201,7 +201,20 @@ namespace detail
 		wincl.cbWndExtra = 0;
 		wincl.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
 
-		::RegisterClassEx(&wincl);
+		ATOM atom = ::RegisterClassEx(&wincl);
+		if (!atom) {
+			char errBuf[128];
+			DWORD err = ::GetLastError();
+			sprintf(errBuf, "FATAL: RegisterClassEx(NanaWindowInternal) failed: err=%lu hInst=%p\n",
+			        (unsigned long)err, (void*)windows_module_handle());
+			OutputDebugStringA(errBuf);
+			// Also write to a file for diagnosis
+			FILE* f = fopen("nana_debug.log", "a");
+			if (f) {
+				fprintf(f, "RegisterClassEx failed: err=%lu\n", (unsigned long)err);
+				fclose(f);
+			}
+		}
 
 		restrict::track_mouse_event = (restrict::track_mouse_event_type)::GetProcAddress(::GetModuleHandleA("User32.DLL"), "TrackMouseEvent");
 

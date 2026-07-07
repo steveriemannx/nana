@@ -20,8 +20,8 @@
 	#include <windows.h>
 #elif defined(NANA_X11)
 	#include <X11/Xlib.h>
-#if !defined(NANA_MACOS)
 #endif
+#if !defined(NANA_MACOS)
 
 namespace nana
 {

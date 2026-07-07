@@ -15,6 +15,8 @@
 #include <nana/gui/screen.hpp>
 #include <nana/gui/detail/bedrock.hpp>
 #include <nana/gui/detail/window_manager.hpp>
+#include "../../paint/image_accessor.hpp"
+#include <cstdio>
 
 #if defined(NANA_WINDOWS)
 #	if defined(STD_THREAD_NOT_SUPPORTED)
@@ -26,6 +28,7 @@
 #elif defined(NANA_X11) || defined(NANA_MACOS)
 #	include <nana/system/platform.hpp>
 #	include "inner_fwd_implement.hpp"
+#endif
 #if !defined(NANA_MACOS)
 
 
@@ -381,6 +384,13 @@ namespace nana{
 											pt.x, pt.y, 100, 100,
 											reinterpret_cast<HWND>(owner), 0, windows_module_handle(), 0);
 
+
+				if (!native_wd) {
+					char errBuf[64];
+					sprintf(errBuf, "CreateWindowEx err=%lu\n", (unsigned long)::GetLastError());
+					OutputDebugStringA(errBuf);
+					return window_result{ nullptr, 0, 0, 0, 0 };
+				}
 			//A window may have a border, this should be adjusted the client area fit for the specified size.
 			::RECT client;
 			::GetClientRect(native_wd, &client);	//The right and bottom of client by GetClientRect indicate the width and height of the area
@@ -1759,7 +1769,5 @@ namespace nana{
 	//end struct native_interface
 	}//end namespace detail
 }//end namespace nana
-
-#endif // !NANA_MACOS
 
 #endif // !NANA_MACOS

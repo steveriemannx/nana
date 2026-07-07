@@ -22,8 +22,8 @@
 	#include <windows.h>
 #elif defined(NANA_X11)
 	#include <X11/Xlib.h>
-#if !defined(NANA_MACOS)
 #endif
+#if !defined(NANA_MACOS)
 
 #include "../detail/platform_abstraction.hpp"
 
@@ -328,7 +328,7 @@ namespace paint
 				else
 					dw->font = impl_->font_shadow.impl_->real_font;
 
-#if defined(NANA_WINDOWS)
+	#if defined(NANA_WINDOWS)
 				HDC hdc = ::GetDC(nullptr);
 				HDC cdc = ::CreateCompatibleDC(hdc);
 				if (nullptr == cdc)

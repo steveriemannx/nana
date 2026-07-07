@@ -23,8 +23,8 @@
 #	include <nana/gui/detail/bedrock.hpp>
 #	include "../detail/platform_spec_selector.hpp"
 #	include "../gui/detail/basic_window.hpp"
-#if !defined(NANA_MACOS)
 #endif
+#if !defined(NANA_MACOS)
 
 namespace nana{ namespace system{
 
