@@ -24,7 +24,7 @@
 #	else
 #		include <Shlobj.h>
 #	endif
-#elif defined(NANA_POSIX)
+#elif defined(NANA_POSIX) && !defined(NANA_MACOS)
 #	include <nana/gui/widgets/label.hpp>
 #	include <nana/gui/widgets/button.hpp>
 #	include <nana/gui/widgets/listbox.hpp>
@@ -40,12 +40,37 @@
 
 #include <iostream> //debug
 
+#if defined(NANA_MACOS)
+extern "C" {
+	struct nana_macos_filebox_data {
+		const char* title;
+		const char* init_path;
+		const char* init_file;
+		bool is_open;
+		bool allow_multi;
+		const char** filter_descs;
+		const char** filter_patterns;
+		int filter_count;
+		void* owner_native;
+	};
+	struct nana_macos_folderbox_data {
+		const char* title;
+		const char* init_path;
+		bool allow_multi;
+		void* owner_native;
+	};
+	int nana_macos_show_filebox(nana_macos_filebox_data*, char***, int*);
+	int nana_macos_show_folderbox(nana_macos_folderbox_data*, char***, int*);
+	void nana_macos_free_filebox_result(char**, int);
+}
+#endif
+
 namespace fs = std::filesystem;
 namespace fs_ext = nana::filesystem_ext;
 
 namespace nana
 {
-#if defined(NANA_POSIX)
+#if defined(NANA_POSIX) && !defined(NANA_MACOS)
 	class filebox_implement
 		: public form
 	{
@@ -1543,7 +1568,7 @@ namespace nana
 			impl_->path = targets.front().parent_path().string();
 		}
 
-#elif defined(NANA_POSIX)
+#elif defined(NANA_POSIX) && !defined(NANA_MACOS)
 		using mode = filebox_implement::mode;
 		filebox_implement fb(impl_->owner, (impl_->open_or_save ? mode::open_file : mode::write_file), impl_->title, false, impl_->allow_multi_select);
 
@@ -1579,6 +1604,36 @@ namespace nana
 			impl_->path = targets.front().parent_path().u8string();
 		else
 			impl_->path.clear();
+#elif defined(NANA_MACOS)
+		{
+			std::string path_str = impl_->path.string();
+			nana_macos_filebox_data data;
+			data.title = impl_->title.c_str();
+			data.init_path = path_str.c_str();
+			data.init_file = impl_->init_file.c_str();
+			data.is_open = impl_->open_or_save;
+			data.allow_multi = impl_->allow_multi_select;
+			data.owner_native = (impl_->owner ? API::root(impl_->owner) : nullptr);
+			std::vector<std::string> desc_strs, pat_strs;
+			std::vector<const char*> descs, patterns;
+			for(auto& f : impl_->filters) {
+				desc_strs.push_back(f.des);
+				pat_strs.push_back(f.type);
+			}
+			for(auto& s : desc_strs) descs.push_back(s.c_str());
+			for(auto& s : pat_strs) patterns.push_back(s.c_str());
+			data.filter_descs = descs.empty() ? nullptr : descs.data();
+			data.filter_patterns = patterns.empty() ? nullptr : patterns.data();
+			data.filter_count = (int)descs.size();
+			char** paths = nullptr;
+			int count = 0;
+			if(nana_macos_show_filebox(&data, &paths, &count) && count > 0) {
+				for(int i = 0; i < count; ++i)
+					targets.emplace_back(paths[i]);
+				nana_macos_free_filebox_result(paths, count);
+				impl_->path = targets.front().parent_path().u8string();
+			}
+		}
 #endif
 		return targets;
 	}
@@ -1713,7 +1768,7 @@ namespace nana
 		}
 #endif
 
-#elif defined(NANA_POSIX)
+#elif defined(NANA_POSIX) && !defined(NANA_MACOS)
 		using mode = filebox_implement::mode;
 		filebox_implement fb(impl_->owner, mode::open_directory, {}, true, impl_->allow_multi_select);
 
@@ -1725,6 +1780,22 @@ namespace nana
 
 		for(auto & p: path_dirs)
 			targets.push_back(p);
+#elif defined(NANA_MACOS)
+		{
+			std::string path_str = impl_->init_path.string();
+			nana_macos_folderbox_data data;
+			data.title = impl_->title.c_str();
+			data.init_path = path_str.c_str();
+			data.allow_multi = impl_->allow_multi_select;
+			data.owner_native = (impl_->owner ? API::root(impl_->owner) : nullptr);
+			char** paths = nullptr;
+			int count = 0;
+			if(nana_macos_show_folderbox(&data, &paths, &count) && count > 0) {
+				for(int i = 0; i < count; ++i)
+					targets.emplace_back(paths[i]);
+				nana_macos_free_filebox_result(paths, count);
+			}
+		}
 #endif
 		return targets;
 	}

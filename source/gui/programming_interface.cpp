@@ -887,10 +887,12 @@ namespace API
 	//@brief: Refresh the window and display it immediately.
 	void refresh_window(window wd)
 	{
+		// Skip refresh if widget is not yet fully attached to a root window
+		// (e.g., during construction via drawer::attached).
+		if (!wd || !wd->root || !restrict::wd_manager().available(wd))
+			return;
 		restrict::wd_manager().update(wd, true, false);
 		// Ensure the native root window display is refreshed.
-		// On platforms like Cocoa, child widget updates don't trigger
-		// a display refresh, so we explicitly refresh the root window.
 		::nana::detail::native_interface::refresh_window(wd->root);
 	}
 
@@ -1006,7 +1008,7 @@ namespace API
 		if ((wd->other.category == category::flags::root) && (wd->flags.modal == false))
 		{
 			wd->flags.modal = true;
-#if defined(NANA_X11)
+#if defined(NANA_X11) || defined(NANA_MACOS)
 			interface_type::set_modal(wd->root);
 #endif
 			restrict::wd_manager().show(wd, true);

@@ -173,7 +173,9 @@ namespace nana{	namespace drawerbase
 				_m_draw_border(graph);
 #endif
 			}
+#ifndef NANA_MACOS
 			_m_draw_title(graph, eb);
+#endif
 		}
 
 

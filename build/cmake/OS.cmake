@@ -47,9 +47,9 @@ if(APPLE)
         "-framework ApplicationServices"
     )
     # Exclude X11-specific source files (not used on macOS)
+    # NOTE: screen.cpp and filebox.cpp both have NANA_POSIX/NANA_MACOS paths
+    # that work on macOS using their respective _macos.mm C helper functions.
     set(NANA_EXCLUDE_SOURCES
-        "${NANA_SOURCE_DIR}/gui/screen.cpp"
-        "${NANA_SOURCE_DIR}/gui/filebox.cpp"
         "${NANA_SOURCE_DIR}/gui/detail/bedrock_posix.cpp"
         "${NANA_SOURCE_DIR}/detail/platform_spec_posix.cpp"
         "${NANA_SOURCE_DIR}/system/dataexch.cpp"
@@ -71,6 +71,7 @@ if(APPLE)
         "${NANA_SOURCE_DIR}/gui/msgbox_macos.mm"
         "${NANA_SOURCE_DIR}/detail/theme_macos.mm"
         "${NANA_SOURCE_DIR}/detail/platform_abstraction_macos.mm"
+        "${NANA_SOURCE_DIR}/gui/filebox_macos.mm"
     )
     set(ENABLE_AUDIO OFF)
 endif()

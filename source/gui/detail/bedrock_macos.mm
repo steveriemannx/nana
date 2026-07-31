@@ -548,7 +548,7 @@ namespace detail
 		while (context->window_count > 0) {
 			@autoreleasepool {
 				NSEvent* ev = [NSApp nextEventMatchingMask:NSEventMaskAny
-					untilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]
+					untilDate:[NSDate distantFuture]
 					inMode:NSDefaultRunLoopMode dequeue:YES];
 				if (ev) [NSApp sendEvent:ev];
 			}

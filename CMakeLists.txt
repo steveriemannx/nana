@@ -97,7 +97,8 @@ if(NOT APPLE)
     list(FILTER SOURCES EXCLUDE REGEX ".*_macos\\.mm$")
 endif()
 
-target_sources(nana PRIVATE ${SOURCES})
+# target_sources(nana PRIVATE ${SOURCES}) — deferred to after OS.cmake include
+# so X11 sources can be excluded and macOS .mm sources added first.
 
 ###    collect all headers sub-directories in a list to avoid duplication   ###
 # To show .h files in Visual Studio, add them to the list of sources in add_executable / add_library / target_sources
@@ -144,6 +145,10 @@ endif()
 list (APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/build/cmake/Modules)
 include(${CMAKE_CURRENT_LIST_DIR}/build/cmake/install_nana.cmake)   # includes and libs, or just expose the nana target
 include(${CMAKE_CURRENT_LIST_DIR}/build/cmake/OS.cmake)             # windows, unix, linux, apple, ...
+
+# Apply filtered SOURCES to the target after OS.cmake has excluded X11 files
+# and added macOS .mm files.
+target_sources(nana PRIVATE ${SOURCES})
 include(${CMAKE_CURRENT_LIST_DIR}/build/cmake/shared_libs.cmake)    # static vs shared
 include(${CMAKE_CURRENT_LIST_DIR}/build/cmake/compilers.cmake)      # VC, gcc, clang
 

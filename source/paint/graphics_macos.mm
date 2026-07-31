@@ -2,6 +2,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
 #import <ImageIO/ImageIO.h>
+#import <AppKit/AppKit.h>
 #import <CoreServices/CoreServices.h>
 #include <nana/paint/graphics.hpp>
 #include <nana/paint/detail/native_paint_interface.hpp>
@@ -79,7 +80,17 @@ void graphics::set_pixel(int x,int y,const ::nana::color&clr){CGContextRef c=C(i
 
 void graphics::round_rectangle(const ::nana::rectangle&r,unsigned ra,unsigned,const ::nana::color&bg,bool,const ::nana::color&){CGContextRef c=C(impl_->pd.get());if(!c)return;CGFloat ch=(CGFloat)CGBitmapContextGetHeight(c);CGFloat w=r.width,ht=r.height,rad=ra;CGFloat cgy=ch-r.y-ht;CGMutablePathRef p=CGPathCreateMutable();CGPathMoveToPoint(p,NULL,r.x+rad,cgy);CGPathAddLineToPoint(p,NULL,r.x+w-rad,cgy);CGPathAddArcToPoint(p,NULL,r.x+w,cgy,r.x+w,cgy+rad,rad);CGPathAddLineToPoint(p,NULL,r.x+w,cgy+ht-rad);CGPathAddArcToPoint(p,NULL,r.x+w,cgy+ht,r.x+w-rad,cgy+ht,rad);CGPathAddLineToPoint(p,NULL,r.x+rad,cgy+ht);CGPathAddArcToPoint(p,NULL,r.x,cgy+ht,r.x,cgy+ht-rad,rad);CGPathAddLineToPoint(p,NULL,r.x,cgy+rad);CGPathAddArcToPoint(p,NULL,r.x,cgy,r.x+rad,cgy,rad);CGPathCloseSubpath(p);CGContextAddPath(c,p);CGContextSetRGBFillColor(c,bg.r()/255.0,bg.g()/255.0,bg.b()/255.0,1);CGContextFillPath(c);CGPathRelease(p);}
 void graphics::frame_rectangle(const ::nana::rectangle&r,const ::nana::color& l,const ::nana::color& t,const ::nana::color& rt,const ::nana::color& b){palette(true,l);line(::nana::point((int)r.x,(int)r.y),::nana::point((int)(r.x+r.width-1),(int)r.y));palette(true,t);line(::nana::point((int)(r.x+r.width-1),(int)r.y),::nana::point((int)(r.x+r.width-1),(int)(r.y+r.height-1)));palette(true,rt);line(::nana::point((int)(r.x+r.width-1),(int)(r.y+r.height-1)),::nana::point((int)r.x,(int)(r.y+r.height-1)));palette(true,b);line(::nana::point((int)r.x,(int)(r.y+r.height-1)),::nana::point((int)r.x,(int)r.y));}
-void graphics::gradual_rectangle(const ::nana::rectangle&,const ::nana::color&,const ::nana::color&,bool){}
+void graphics::gradual_rectangle(const ::nana::rectangle&r,const ::nana::color&from,const ::nana::color&to,bool vert){
+    CGContextRef c=C(impl_->pd.get());if(!c)return;
+    CGColorSpaceRef cs=CGColorSpaceCreateDeviceRGB();
+    CGFloat comps[]={from.r()/255.0f,from.g()/255.0f,from.b()/255.0f,1.0f,to.r()/255.0f,to.g()/255.0f,to.b()/255.0f,1.0f};
+    CGGradientRef grad=CGGradientCreateWithColorComponents(cs,comps,NULL,2);
+    CGColorSpaceRelease(cs);
+    if(!grad)return;
+    CGFloat ch=(CGFloat)CGBitmapContextGetHeight(c);
+    CGContextDrawLinearGradient(c,grad,CGPointMake((CGFloat)r.x,ch-(CGFloat)r.y-(CGFloat)r.height),CGPointMake((CGFloat)r.x,ch-(CGFloat)r.y),0);
+    CGGradientRelease(grad);
+  }
 void graphics::frame_rectangle(const ::nana::rectangle& r,const ::nana::color& clr,unsigned gap){palette(false,clr);if(r.width>gap*2){::nana::point left{r.x+static_cast<int>(gap),r.y},right_{r.right()-static_cast<int>(gap)-1,r.y};line(left,right_);left.y=right_.y=r.bottom()-1;line(left,right_);}if(r.height>gap*2){::nana::point top{r.x,r.y+static_cast<int>(gap)},bottom_{r.x,r.bottom()-static_cast<int>(gap)-1};line(top,bottom_);top.x=bottom_.x=r.right()-1;line(top,bottom_);}}
 void graphics::rgb_to_wb(){CGContextRef c=C(impl_->pd.get());if(!c)return;unsigned char*data=(unsigned char*)CGBitmapContextGetData(c);size_t w=CGBitmapContextGetWidth(c);size_t h=CGBitmapContextGetHeight(c);size_t bpr=CGBitmapContextGetBytesPerRow(c);float tr[256],tg[256],tb[256];for(int i=0;i<256;++i){tr[i]=static_cast<float>(i*0.3f);tg[i]=static_cast<float>(i*0.59f);tb[i]=static_cast<float>(i*0.11f);}for(size_t y=0;y<h;++y){unsigned char*row=data+y*bpr;for(size_t x=0;x<w;++x){size_t off=x*4;unsigned char gray=static_cast<unsigned char>(tr[row[off+2]]+tg[row[off+1]]+tb[row[off]]+0.5f);row[off]=gray;row[off+1]=gray;row[off+2]=gray;}}}
 
@@ -96,15 +107,46 @@ nana::size graphics::bidi_extent_size(std::string_view t)const{return text_exten
 nana::size graphics::bidi_extent_size(std::wstring_view t)const{return text_extent_size(t);}
 bool graphics::text_metrics(unsigned&a,unsigned&d,unsigned&l)const{a=10;d=2;l=0;if(impl_->pd&&impl_->pd->font){CTFontRef f=(CTFontRef)impl_->pd->font->native_handle();if(f){a=(unsigned)CTFontGetAscent(f);d=(unsigned)CTFontGetDescent(f);l=(unsigned)CTFontGetLeading(f);}}return true;}
 
-void graphics::paste(native_window_type,int,int,unsigned,unsigned,int,int)const{}
-void graphics::paste(drawable_type,int,int)const{}
+void graphics::paste(native_window_type wd,int x,int y,unsigned w,unsigned h,int dx,int dy)const{
+    if(!impl_->pd||!C(impl_->pd.get())||!wd)return;
+    NSView* view=(__bridge NSView*)(void*)wd;if(!view)return;
+    NSBitmapImageRep* rep=[view bitmapImageRepForCachingDisplayInRect:NSMakeRect((CGFloat)x,(CGFloat)y,(CGFloat)w,(CGFloat)h)];
+    if(!rep)return;[view cacheDisplayInRect:NSMakeRect((CGFloat)x,(CGFloat)y,(CGFloat)w,(CGFloat)h) toBitmapImageRep:rep];
+    CGImageRef im=[rep CGImage];if(!im)return;
+    CGContextRef ctx=C(impl_->pd.get());CGContextSaveGState(ctx);
+    CGContextTranslateCTM(ctx,0,(CGFloat)dy+(CGFloat)h);CGContextScaleCTM(ctx,1.0,-1.0);
+    CGContextDrawImage(ctx,CGRectMake((CGFloat)dx,0,(CGFloat)w,(CGFloat)h),im);CGContextRestoreGState(ctx);
+  }
+void graphics::paste(drawable_type dt,int x,int y)const{
+    if(!impl_->pd||!C(impl_->pd.get())||!dt||!dt->pixmap)return;
+    CGImageRef im=CGBitmapContextCreateImage((CGContextRef)dt->pixmap);if(!im)return;
+    size_t dw=CGBitmapContextGetWidth((CGContextRef)dt->pixmap);
+    size_t dh=CGBitmapContextGetHeight((CGContextRef)dt->pixmap);
+    CGContextRef ctx=C(impl_->pd.get());CGContextSaveGState(ctx);
+    CGContextTranslateCTM(ctx,0,(CGFloat)(y+dh));CGContextScaleCTM(ctx,1.0,-1.0);
+    CGContextDrawImage(ctx,CGRectMake((CGFloat)x,0,(CGFloat)dw,(CGFloat)dh),im);
+    CGContextRestoreGState(ctx);CGImageRelease(im);
+  }
 void graphics::paste(const ::nana::rectangle&r,graphics&d,int x,int y)const{if(!d.impl_->pd||!C(d.impl_->pd.get()))return;if(!impl_->pd||!impl_->pd->pixmap)return;CGImageRef im=CGBitmapContextCreateImage((CGContextRef)impl_->pd->pixmap);if(im){auto ctx=C(d.impl_->pd.get());CGContextSaveGState(ctx);CGContextTranslateCTM(ctx,0,y+r.height);CGContextScaleCTM(ctx,1.0,-1.0);CGContextDrawImage(ctx,CGRectMake(x,0,r.width,r.height),im);CGContextRestoreGState(ctx);CGImageRelease(im);}}
 void graphics::paste(graphics&d,int x,int y)const{if(!impl_->pd||!C(impl_->pd.get()))return;if(!d.impl_->pd||!d.impl_->pd->pixmap)return;CGImageRef im=CGBitmapContextCreateImage((CGContextRef)d.impl_->pd->pixmap);if(im){auto ctx=C(impl_->pd.get());CGContextSaveGState(ctx);CGContextTranslateCTM(ctx,0,y+d.impl_->sz.height);CGContextScaleCTM(ctx,1.0,-1.0);CGContextDrawImage(ctx,CGRectMake(x,0,d.impl_->sz.width,d.impl_->sz.height),im);CGContextRestoreGState(ctx);CGImageRelease(im);}}
-void graphics::paste(native_window_type,const ::nana::rectangle&,int,int)const{}
+void graphics::paste(native_window_type wd,const ::nana::rectangle&r,int x,int y)const{
+    if(!impl_->pd||!C(impl_->pd.get())||!wd)return;
+    NSView* view=(__bridge NSView*)(void*)wd;if(!view)return;
+    NSBitmapImageRep* rep=[view bitmapImageRepForCachingDisplayInRect:NSMakeRect((CGFloat)r.x,(CGFloat)r.y,(CGFloat)r.width,(CGFloat)r.height)];
+    if(!rep)return;[view cacheDisplayInRect:NSMakeRect((CGFloat)r.x,(CGFloat)r.y,(CGFloat)r.width,(CGFloat)r.height) toBitmapImageRep:rep];
+    CGImageRef im=[rep CGImage];if(!im)return;
+    CGContextRef ctx=C(impl_->pd.get());CGContextSaveGState(ctx);
+    CGContextTranslateCTM(ctx,0,(CGFloat)(y+r.height));CGContextScaleCTM(ctx,1.0,-1.0);
+    CGContextDrawImage(ctx,CGRectMake((CGFloat)x,0,(CGFloat)r.width,(CGFloat)r.height),im);CGContextRestoreGState(ctx);
+  }
 
 void graphics::bitblt(int x,int y,const graphics&src){const_cast<graphics*>(this)->paste(const_cast<graphics&>(src),x,y);}
-void graphics::bitblt(const ::nana::rectangle&,native_window_type){}
-void graphics::bitblt(const ::nana::rectangle&,native_window_type,const point&){}
+void graphics::bitblt(const ::nana::rectangle&r,native_window_type wd){
+    const_cast<graphics*>(this)->paste(wd,r.x,r.y,r.width,r.height,r.x,r.y);
+  }
+void graphics::bitblt(const ::nana::rectangle&r,native_window_type wd,const point&p){
+    const_cast<graphics*>(this)->paste(wd,p.x,p.y,r.width,r.height,r.x,r.y);
+  }
 void graphics::bitblt(const ::nana::rectangle&r,const graphics&s){
 	nana::rectangle local_src(0, 0, r.width, r.height);
 	const_cast<graphics&>(s).paste(local_src, *this, r.x, r.y);
@@ -114,11 +156,59 @@ void graphics::bitblt(const ::nana::rectangle&r,const graphics&s,const point&p){
 	nana::rectangle local_src(0, 0, r.width, r.height);
 	const_cast<graphics&>(s).paste(local_src, *this, r.x, r.y);
 }
-void graphics::stretch(const ::nana::rectangle&,graphics&,const ::nana::rectangle&)const{}
-void graphics::stretch(graphics&,const ::nana::rectangle&)const{}
-void graphics::blend(const ::nana::rectangle&,const ::nana::color&,double){}
-void graphics::blend(const ::nana::rectangle&,const graphics&,const point&,double){}
-void graphics::blur(const ::nana::rectangle&,std::size_t){}
+void graphics::stretch(const ::nana::rectangle&src_r,graphics&dst,const ::nana::rectangle&dst_r)const{
+    if(!impl_->pd||!impl_->pd->pixmap||!dst.impl_->pd||!dst.impl_->pd->pixmap)return;
+    CGImageRef im=CGBitmapContextCreateImage((CGContextRef)impl_->pd->pixmap);if(!im)return;
+    CGContextRef ctx=C(dst.impl_->pd.get());CGFloat ch=(CGFloat)CGBitmapContextGetHeight(ctx);
+    CGContextSaveGState(ctx);CGContextTranslateCTM(ctx,0,ch-(CGFloat)(dst_r.y+dst_r.height));CGContextScaleCTM(ctx,1.0,-1.0);
+    CGContextDrawImage(ctx,CGRectMake((CGFloat)dst_r.x,(CGFloat)dst_r.y,(CGFloat)dst_r.width,(CGFloat)dst_r.height),im);
+    CGContextRestoreGState(ctx);CGImageRelease(im);
+  }
+void graphics::stretch(graphics&dst,const ::nana::rectangle&r)const{
+    stretch(::nana::rectangle{size()},dst,r);
+  }
+void graphics::blend(const ::nana::rectangle&r,const ::nana::color&clr,double alpha){
+    CGContextRef c=C(impl_->pd.get());if(!c)return;
+    CGContextSaveGState(c);CGContextSetRGBFillColor(c,(CGFloat)clr.r()/255.0,(CGFloat)clr.g()/255.0,(CGFloat)clr.b()/255.0,(CGFloat)alpha);
+    CGContextFillRect(c,CGRectMake((CGFloat)r.x,(CGFloat)r.y,(CGFloat)r.width,(CGFloat)r.height));CGContextRestoreGState(c);
+  }
+void graphics::blend(const ::nana::rectangle&r,const graphics&src,const point&,double alpha){
+    if(!impl_->pd||!impl_->pd->pixmap||!src.impl_->pd||!src.impl_->pd->pixmap)return;
+    CGImageRef im=CGBitmapContextCreateImage((CGContextRef)src.impl_->pd->pixmap);if(!im)return;
+    CGContextRef ctx=C(impl_->pd.get());CGFloat ch=(CGFloat)CGBitmapContextGetHeight(ctx);
+    CGContextSaveGState(ctx);CGContextSetAlpha(ctx,(CGFloat)alpha);
+    CGContextTranslateCTM(ctx,0,ch-(CGFloat)(r.y+r.height));CGContextScaleCTM(ctx,1.0,-1.0);
+    CGContextDrawImage(ctx,CGRectMake((CGFloat)r.x,(CGFloat)r.y,(CGFloat)r.width,(CGFloat)r.height),im);
+    CGContextRestoreGState(ctx);CGImageRelease(im);
+  }
+void graphics::blur(const ::nana::rectangle&r,std::size_t radius){
+    if(!impl_->pd||!impl_->pd->pixmap||radius<1)return;
+    unsigned char* data=(unsigned char*)CGBitmapContextGetData((CGContextRef)impl_->pd->pixmap);if(!data)return;
+    size_t w=CGBitmapContextGetWidth((CGContextRef)impl_->pd->pixmap);
+    size_t h=CGBitmapContextGetHeight((CGContextRef)impl_->pd->pixmap);
+    size_t bpr=CGBitmapContextGetBytesPerRow((CGContextRef)impl_->pd->pixmap);
+    int rx=(int)r.x,ry=(int)r.y,rw=(int)r.width,rh=(int)r.height;
+    if(rx<0)rx=0;if(ry<0)ry=0;if(rx+rw>(int)w)rw=(int)w-rx;if(ry+rh>(int)h)rh=(int)h-ry;
+    if(rw<1||rh<1)return;
+    size_t rad=radius>20?20:radius;
+    std::vector<unsigned char> buf(rw*rh*4),tmp(rw*rh*4);
+    for(int y=0;y<rh;++y)for(int x=0;x<rw;++x){
+        size_t off=((size_t)(ry+y))*bpr+((size_t)(rx+x))*4;
+        tmp[y*rw*4+x*4]=data[off];tmp[y*rw*4+x*4+1]=data[off+1];tmp[y*rw*4+x*4+2]=data[off+2];
+    }
+    for(int y=0;y<rh;++y)for(int x=0;x<rw;++x){
+        unsigned sr=0,sg=0,sb=0,count=0;
+        for(int dy=(int)(y>rad?y-rad:0);dy<=y+(int)rad&&dy<rh;++dy)
+        for(int dx=(int)(x>rad?x-rad:0);dx<=x+(int)rad&&dx<rw;++dx){
+            size_t soff=dy*rw*4+dx*4;sr+=tmp[soff+2];sg+=tmp[soff+1];sb+=tmp[soff];++count;
+        }
+        if(count){size_t off=y*rw*4+x*4;buf[off]=(unsigned char)(sb/count);buf[off+1]=(unsigned char)(sg/count);buf[off+2]=(unsigned char)(sr/count);}
+    }
+    for(int y=0;y<rh;++y)for(int x=0;x<rw;++x){
+        size_t doff=((size_t)(ry+y))*bpr+((size_t)(rx+x))*4;size_t soff=y*rw*4+x*4;
+        data[doff]=buf[soff];data[doff+1]=buf[soff+1];data[doff+2]=buf[soff+2];
+    }
+  }
 
 void graphics::save_as_file(const char* file_utf8) const noexcept{
 	if(!impl_->pd||!impl_->pd->pixmap)return;
@@ -139,7 +229,66 @@ void paint::draw::corner(const rectangle& r, unsigned px) {
 	if(px>1){graph_.line(r.position(),point(r.x+px,r.y));graph_.line(r.position(),point(r.x,r.y+px));int rt=r.right()-1;graph_.line(point(rt,r.y),point(rt-px,r.y));graph_.line(point(rt,r.y),point(rt,r.y-px));int bt=r.bottom()-1;graph_.line(point(r.x,bt),point(r.x+px,bt));graph_.line(point(r.x,bt),point(r.x,bt-px));graph_.line(point(rt,bt),point(rt-px,bt));graph_.line(point(rt,bt),point(rt,bt-px));}
 }
 
-std::unique_ptr<unsigned[]> graphics::glyph_pixels(std::wstring_view)const{return nullptr;}
+std::unique_ptr<unsigned[]> graphics::glyph_pixels(std::wstring_view text)const{
+	auto result=std::make_unique<unsigned[]>(text.empty()?1:text.size());
+	if(!impl_->pd||!impl_->pd->font||text.empty()){
+		if(text.empty()) result[0]=0;
+		else for(size_t i=0;i<text.size();++i) result[i]=0;
+		return result;
+	}
+	CTFontRef font=(CTFontRef)impl_->pd->font->native_handle();
+	if(!font){for(size_t i=0;i<text.size();++i)result[i]=0;return result;}
+	// Convert UTF-32 wchar_t to UTF-16
+	std::vector<UniChar> utf16;utf16.reserve(text.size()*2);
+	std::vector<std::size_t> cmap(text.size()+1);
+	for(std::size_t i=0;i<text.size();++i){
+		cmap[i]=utf16.size();
+		wchar_t wc=text[i];
+		if(wc<=0xFFFF) utf16.push_back((UniChar)wc);
+		else{wc-=0x10000;utf16.push_back((UniChar)(0xD800|(wc>>10)));utf16.push_back((UniChar)(0xDC00|(wc&0x3FF)));}
+	}
+	cmap[text.size()]=utf16.size();
+	std::vector<CGGlyph> glyphs(utf16.size());
+	bool anyGlyphs=false;
+	for(size_t i=0;i<utf16.size();++i){
+		CGGlyph g;
+		if(CTFontGetGlyphsForCharacters(font,&utf16[i],&g,1)){glyphs[i]=g;if(g)anyGlyphs=true;}
+		else glyphs[i]=0;
+	}
+	std::vector<CGSize> advances(utf16.size(),CGSize{0,0});
+	if(anyGlyphs) CTFontGetAdvancesForGlyphs(font,kCTFontOrientationDefault,glyphs.data(),advances.data(),utf16.size());
+	for(std::size_t i=0;i<text.size();++i){
+		double adv=0;
+		for(std::size_t j=cmap[i];j<cmap[i+1];++j) adv+=advances[j].width;
+		result[i]=(unsigned)std::max(0.0,std::ceil(adv));
+	}
+	return result;
+}
+#ifndef _nana_std_has_string_view
+bool graphics::glyph_pixels(const wchar_t*str,std::size_t length,unsigned*pxbuf)const{
+	if(!impl_->pd||!impl_->pd->font||!str||!length||!pxbuf) return false;
+	auto pixels=glyph_pixels(std::wstring_view(str,length));
+	if(!pixels) return false;
+	for(std::size_t i=0;i<length;++i) pxbuf[i]=pixels[i];
+	return true;
+}
+::nana::size graphics::glyph_extent_size(const wchar_t*text,std::size_t length,std::size_t begin,std::size_t end)const{
+	return glyph_extent_size(std::wstring_view(text,length),begin,end);
+}
+::nana::size graphics::glyph_extent_size(const std::wstring&text,std::size_t length,std::size_t begin,std::size_t end)const{
+	return glyph_extent_size(std::wstring_view(text.data(),length),begin,end);
+}
+#endif
+#ifdef _nana_std_has_string_view
+::nana::size graphics::glyph_extent_size(std::wstring_view text,std::size_t begin,std::size_t end)const{
+	if(!impl_->pd||!impl_->pd->font||begin>=end||end>text.size()) return {};
+	auto px=glyph_pixels(text);
+	unsigned w=0;
+	for(std::size_t i=begin;i<end;++i) w+=px[i];
+	unsigned h=(unsigned)impl_->pd->font->size();
+	return {w,h};
+}
+#endif
 }} // namespace
 
 namespace nana { namespace detail {

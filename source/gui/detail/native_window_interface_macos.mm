@@ -279,6 +279,50 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
 }
 - (NSUInteger)characterIndexForPoint:(NSPoint)point { return NSNotFound; }
 
+// NSDraggingDestination for file drop support
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+    NSPasteboard* pb = [sender draggingPasteboard];
+    if ([pb.types containsObject:NSPasteboardTypeFileURL])
+        return NSDragOperationCopy;
+    return NSDragOperationNone;
+}
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender { return [self draggingEntered:sender]; }
+- (void)draggingExited:(id<NSDraggingInfo>)sender {}
+- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)sender { return YES; }
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+    if (!_nanaRootWindow) return NO;
+    NSPasteboard* pb = [sender draggingPasteboard];
+    NSArray* urls = [pb readObjectsForClasses:@[[NSURL class]] options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+    if (!urls || [urls count] == 0) return NO;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::native_window_type)_nanaRootWindow);
+    if (!rw) return NO;
+    NSPoint loc = [self convertPoint:[sender draggingLocation] fromView:nil];
+    nana::point pt((int)loc.x, (int)loc.y);
+    auto* tw = b.wd_manager().find_window((nana::native_window_type)_nanaRootWindow, pt);
+    if (!tw) tw = rw;
+    std::vector<std::filesystem::path> files;
+    for (NSURL* url in urls) {
+        if ([url isFileURL]) {
+            const char* path = [[url path] UTF8String];
+            if (path) files.emplace_back(path);
+        }
+    }
+    if (!files.empty()) {
+        nana::arg_dropfiles arg;
+        arg.window_handle = tw;
+        arg.pos.x = (int)loc.x - tw->pos_root.x;
+        arg.pos.y = (int)loc.y - tw->pos_root.y;
+        arg.files.swap(files);
+        tw->annex.events_ptr->mouse_dropfiles.emit(arg, tw);
+        b.wd_manager().do_lazy_refresh(tw, false);
+        [self setNeedsDisplay:YES];
+        return YES;
+    }
+    return NO;
+}
+- (void)concludeDragOperation:(id<NSDraggingInfo>)sender {}
+
 @end
 
 // ============ NanaNSWindow ============
@@ -374,6 +418,108 @@ void nana_macos_update_native_control(void* bwd_ptr, int x, int y, unsigned w, u
     if (title && [view isKindOfClass:[NSButton class]])
         [(NSButton*)view setTitle:[NSString stringWithUTF8String:title]];
 }
+
+void* nana_macos_create_native_label(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h, const char* title) {
+    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
+    NSView* pv = pd ? pd->view : nil;
+    if (!pv) return nullptr;
+    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
+    NSTextField* label = [[NSTextField alloc] initWithFrame:frame];
+    [label setStringValue:[NSString stringWithUTF8String:title ?: ""]];
+    [label setBezeled:NO];
+    [label setDrawsBackground:NO];
+    [label setEditable:NO];
+    [label setSelectable:NO];
+    [pv addSubview:label];
+    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = label; }
+    [label release];
+    return (void*)label;
+}
+void* nana_macos_create_native_checkbox(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h, const char* title) {
+    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
+    NSView* pv = pd ? pd->view : nil;
+    if (!pv) return nullptr;
+    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
+    NSButton* btn = [[NSButton alloc] initWithFrame:frame];
+    [btn setTitle:[NSString stringWithUTF8String:title ?: ""]];
+    [btn setButtonType:NSButtonTypeSwitch];
+    [btn setState:NSControlStateValueOff];
+    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
+    tgt.basicWindow = bwd_ptr;
+    [btn setTarget:tgt];
+    [btn setAction:@selector(onClick:)];
+    objc_setAssociatedObject(btn, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
+    [pv addSubview:btn];
+    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = btn; }
+    [btn release];
+    return (void*)btn;
+}
+void* nana_macos_create_native_combobox(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h) {
+    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
+    NSView* pv = pd ? pd->view : nil;
+    if (!pv) return nullptr;
+    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
+    NSPopUpButton* popup = [[NSPopUpButton alloc] initWithFrame:frame pullsDown:NO];
+    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
+    tgt.basicWindow = bwd_ptr;
+    [popup setTarget:tgt];
+    [popup setAction:@selector(onClick:)];
+    objc_setAssociatedObject(popup, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
+    [pv addSubview:popup];
+    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = popup; }
+    [popup release];
+    return (void*)popup;
+}
+void* nana_macos_create_native_progress(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h) {
+    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
+    NSView* pv = pd ? pd->view : nil;
+    if (!pv) return nullptr;
+    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
+    NSProgressIndicator* pi = [[NSProgressIndicator alloc] initWithFrame:frame];
+    [pi setStyle:NSProgressIndicatorStyleBar];
+    [pi setIndeterminate:NO];
+    [pi setMinValue:0.0];
+    [pi setMaxValue:100.0];
+    [pi setDoubleValue:0.0];
+    [pv addSubview:pi];
+    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = pi; }
+    [pi release];
+    return (void*)pi;
+}
+void* nana_macos_create_native_slider(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h) {
+    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
+    NSView* pv = pd ? pd->view : nil;
+    if (!pv) return nullptr;
+    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
+    NSSlider* slider = [[NSSlider alloc] initWithFrame:frame];
+    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
+    tgt.basicWindow = bwd_ptr;
+    [slider setTarget:tgt];
+    [slider setAction:@selector(onClick:)];
+    objc_setAssociatedObject(slider, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
+    [pv addSubview:slider];
+    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = slider; }
+    [slider release];
+    return (void*)slider;
+}
+void* nana_macos_create_native_datepicker(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h) {
+    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
+    NSView* pv = pd ? pd->view : nil;
+    if (!pv) return nullptr;
+    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
+    NSDatePicker* dp = [[NSDatePicker alloc] initWithFrame:frame];
+    [dp setDatePickerStyle:NSDatePickerStyleClockAndCalendar];
+    [dp setDatePickerElements:NSDatePickerElementFlagYearMonthDay];
+    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
+    tgt.basicWindow = bwd_ptr;
+    [dp setTarget:tgt];
+    [dp setAction:@selector(onClick:)];
+    objc_setAssociatedObject(dp, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
+    [pv addSubview:dp];
+    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = dp; }
+    [dp release];
+    return (void*)dp;
+}
 } // extern "C"
 
 namespace nana { namespace detail {
@@ -414,6 +560,7 @@ native_interface::window_result native_interface::create_window(
 
         NanaNSView* view = [[NanaNSView alloc] initWithFrame:[[win contentView] bounds]];
         [win setContentView:view];
+        [view registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
         [view release];
 
         NanaNSWindowDelegate* del = [[NanaNSWindowDelegate alloc] init];
@@ -459,7 +606,14 @@ void native_interface::close_window(native_window_type w) {
     if (was_win) {
         bool has = false;
         for (auto& kv : wd_map) if (kv.second.win) { has = true; break; }
-        if (!has) [NSApp terminate:nil];
+        if (!has) {
+            // Wake the event loop so it can exit
+            [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                location:NSZeroPoint modifierFlags:0 timestamp:0
+                windowNumber:0 context:nil subtype:0 data1:0 data2:0]
+                atStart:YES];
+            [NSApp terminate:nil];
+        }
     }
 }
 void native_interface::show_window(native_window_type w, bool show, bool active) {
@@ -536,7 +690,18 @@ void native_interface::bring_top(native_window_type w, bool act) {
     else [d->win orderFront:nil];
 }
 void native_interface::set_window_z_order(native_window_type w, native_window_type after, z_order_action act) {}
-native_interface::frame_extents native_interface::window_frame_extents(native_window_type w) { return {0,0,0,0}; }
+native_interface::frame_extents native_interface::window_frame_extents(native_window_type w) {
+	frame_extents fm_extents{0, 0, 0, 0};
+	auto* d = gwd(w);
+	if (!d || !d->win) return fm_extents;
+	NSRect frame = [d->win frame];
+	NSRect content = [d->win contentRectForFrameRect:frame];
+	fm_extents.bottom = (int)content.origin.y;
+	fm_extents.top    = (int)(frame.size.height - (content.origin.y + content.size.height));
+	fm_extents.left   = (int)content.origin.x;
+	fm_extents.right  = (int)(frame.size.width - (content.origin.x + content.size.width));
+	return fm_extents;
+}
 bool native_interface::window_size(native_window_type w, const size& sz) {
     auto* d = gwd(w);
     if (!d || !d->win) return false;
@@ -570,6 +735,17 @@ auto native_interface::window_caption(native_window_type w) -> native_string_typ
     return "";
 }
 void native_interface::capture_window(native_window_type, bool) {}
+void native_interface::set_modal(native_window_type wd) {
+	cocoa_wd* d = gwd(wd);
+	if (!d || !d->win) return;
+	native_window_type owner = platform_spec::instance().get_owner(wd);
+	if (owner) {
+		cocoa_wd* owner_d = gwd(owner);
+		if (owner_d && owner_d->win) {
+			[owner_d->win beginSheet:d->win completionHandler:nil];
+		}
+	}
+}
 nana::point native_interface::cursor_position() {
     NSPoint loc = [NSEvent mouseLocation];
     NSRect sf = [[NSScreen mainScreen] frame];
@@ -619,10 +795,50 @@ void native_interface::set_focus(native_window_type w) {
     auto* d = gwd(w);
     if (d && d->win) [d->win makeFirstResponder:d->view];
 }
-native_window_type native_interface::get_focus_window() { return nullptr; }
-bool native_interface::calc_screen_point(native_window_type w, nana::point& pos) { return false; }
-bool native_interface::calc_window_point(native_window_type w, nana::point& pos) { return false; }
-native_window_type native_interface::find_window(int x, int y) { return nullptr; }
+native_window_type native_interface::get_focus_window() {
+	NSWindow* keyWin = [NSApp keyWindow];
+	if (!keyWin) return nullptr;
+	return reinterpret_cast<native_window_type>((__bridge void*)keyWin);
+}
+bool native_interface::calc_screen_point(native_window_type w, nana::point& pos) {
+	auto* d = gwd(w);
+	if (!d || !d->win) return false;
+	NSRect content = [d->win contentRectForFrameRect:[d->win frame]];
+	NSScreen* sc = [d->win screen] ?: [NSScreen mainScreen];
+	CGFloat screenH = [sc frame].size.height;
+	CGFloat winX = [d->win frame].origin.x + content.origin.x;
+	CGFloat winY = [d->win frame].origin.y + content.origin.y;
+	pos.x += (int)winX;
+	pos.y += (int)(screenH - winY - content.size.height);
+	return true;
+}
+bool native_interface::calc_window_point(native_window_type w, nana::point& pos) {
+	auto* d = gwd(w);
+	if (!d || !d->win) return false;
+	NSRect content = [d->win contentRectForFrameRect:[d->win frame]];
+	NSScreen* sc = [d->win screen] ?: [NSScreen mainScreen];
+	CGFloat screenH = [sc frame].size.height;
+	CGFloat winX = [d->win frame].origin.x + content.origin.x;
+	CGFloat winY = [d->win frame].origin.y + content.origin.y;
+	pos.x -= (int)winX;
+	pos.y = (int)(screenH - pos.y - winY - content.size.height);
+	return true;
+}
+native_window_type native_interface::find_window(int x, int y) {
+	std::lock_guard<std::recursive_mutex> lk(wd_mutex);
+	for (auto& kv : wd_map) {
+		auto* d = &kv.second;
+		if (!d->win || !d->visible) continue;
+		NSRect frame = [d->win frame];
+		NSScreen* sc = [d->win screen] ?: [NSScreen mainScreen];
+		CGFloat screenH = [sc frame].size.height;
+		CGFloat macY = screenH - y - frame.size.height;
+		if (x >= frame.origin.x && x < frame.origin.x + frame.size.width &&
+			macY >= frame.origin.y && macY < frame.origin.y + frame.size.height)
+			return kv.first;
+	}
+	return nullptr;
+}
 nana::size native_interface::check_track_size(nana::size sz, unsigned, unsigned, bool) { return sz; }
 
 }} // namespace
