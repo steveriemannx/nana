@@ -27,13 +27,6 @@
 #include <algorithm>
 #include <iterator>
 
-#if defined(NANA_MACOS)
-extern "C" {
-void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const char*);
-void* nana_macos_create_native_label(void*, void*, int, int, unsigned, unsigned, const char*);
-}
-#endif
-
 #if defined(STD_THREAD_NOT_SUPPORTED)
 #include <nana/std_mutex.hpp>
 #else
@@ -617,6 +610,8 @@ namespace detail
 					}
 
 					native_interface::close_window(wd->root);
+					//A closed root never reaches _m_destroy, so drop its capture here.
+					_m_release_capture_of(wd);
 				}
 			}
 			else
@@ -864,14 +859,6 @@ namespace detail
 					native_interface::move_window(wd->root, root_r.x, root_r.y);
 			}
 
-	#if defined(NANA_MACOS)
-			// Update native Cocoa control frame after move/size
-			if (category::flags::root != wd->other.category) {
-				nana_macos_update_native_control((void*)wd,
-					wd->pos_root.x, wd->pos_root.y,
-					wd->dimension.width, wd->dimension.height, nullptr);
-			}
-#endif
 		return (moved || size_changed);
 	}
 
@@ -1704,6 +1691,25 @@ namespace detail
 			}
 		}
 
+		//A window that goes away must not stay the mouse capture. Windows releases
+		//it in the OS, but the Cocoa backend has no equivalent, so a capture taken
+		//by e.g. a combobox drop-down outlives the drop-down and keeps redirecting
+		//every find_window() to a window that is gone, which makes the whole UI
+		//stop responding to the mouse.
+		void window_manager::_m_release_capture_of(basic_window* wd)
+		{
+			auto& cap = attr_.capture;
+			if (cap.window && (cap.window == wd || (wd && cap.window->root == wd->root)))
+			{
+				cap.window = nullptr;
+				cap.ignore_children = true;
+				native_interface::capture_window(wd->root, false);
+			}
+			cap.history.erase(std::remove_if(cap.history.begin(), cap.history.end(),
+				[wd](const std::pair<basic_window*, bool>& entry) { return entry.first == wd; }),
+				cap.history.end());
+		}
+
 		void window_manager::_m_destroy(basic_window* wd)
 		{
 			if(wd->flags.destroying) return;
@@ -1712,6 +1718,8 @@ namespace detail
 			brock.thread_context_destroy(wd);
 
 			wd->flags.destroying = true;
+
+			_m_release_capture_of(wd);
 
 			if(wd->annex.caret_ptr)
 			{

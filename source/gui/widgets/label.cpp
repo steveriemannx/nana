@@ -17,12 +17,6 @@
 #include <nana/gui/detail/widget_content_measurer_interface.hpp>
 #include <nana/unicode_bidi.hpp>
 #include "../detail/basic_window.hpp"
-#if defined(NANA_MACOS)
-extern "C" {
-void* nana_macos_create_native_label(void*, void*, int, int, unsigned, unsigned, const char*);
-void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const char*);
-}
-#endif
 #include <nana/system/platform.hpp>
 #include <stdexcept>
 #include <sstream>

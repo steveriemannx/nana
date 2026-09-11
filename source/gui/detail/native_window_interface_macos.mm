@@ -5,65 +5,21 @@
 #include "../../detail/platform_spec_selector.hpp"
 #include "../detail/basic_window.hpp"
 #import <Cocoa/Cocoa.h>
-#import <objc/runtime.h>
 #include <map>
 #include <mutex>
 
 #if defined(NANA_MACOS)
 
-// Forward declare keyboard lookup (implemented in bedrock_cocoa.mm)
+// Forward declare keyboard lookup and hover tracking (implemented in bedrock_macos.mm)
 namespace nana { namespace detail {
     struct root_misc;
     void cocoa_lookup_chars(const root_misc*, basic_window*, const char*, std::size_t, const arg_keyboard&);
+    bool cocoa_mouse_hover(native_window_type, basic_window*, const nana::point&);
+    void cocoa_mouse_leave(native_window_type);
+    wchar_t cocoa_key_from_keycode(unsigned short keyCode);
+    wchar_t cocoa_key_from_function_char(const char* utf8, std::size_t len);
+    bool cocoa_translate_accel(native_window_type, const void* nsevent);
 }}
-
-// Map macOS key codes to nana keyboard codes for non-character keys
-static wchar_t cocoa_key_to_nana(unsigned short keyCode) {
-    switch(keyCode) {
-    case 0x24: return nana::keyboard::enter;
-    case 0x30: return nana::keyboard::tab;
-    case 0x33: return nana::keyboard::backspace;
-    case 0x35: return nana::keyboard::escape;
-    case 0x75: return nana::keyboard::del;
-    case 0x72: return nana::keyboard::os_insert;
-    case 0x73: return nana::keyboard::os_pageup;    // home
-    case 0x74: return nana::keyboard::os_pagedown;  // page up
-    case 0x77: return nana::keyboard::os_pagedown;  // end
-    case 0x79: return nana::keyboard::os_pageup;    // page down
-    case 0x7E: return nana::keyboard::os_arrow_up;
-    case 0x7D: return nana::keyboard::os_arrow_down;
-    case 0x7B: return nana::keyboard::os_arrow_left;
-    case 0x7C: return nana::keyboard::os_arrow_right;
-    case 0x37: case 0x3B: case 0x3A: case 0x3E:
-        return nana::keyboard::os_ctrl;
-    case 0x38: case 0x3C: return nana::keyboard::os_shift;
-    case 0x39: case 0x3D: return nana::keyboard::alt;
-    default:   return 0;
-    }
-}
-
-// Helpers for native controls
-static std::map<void*, NSView*> native_controls;
-static std::recursive_mutex native_ctrl_mutex;
-extern "C" {
-void* nana_macos_create_native_button(void*, void*, int, int, unsigned, unsigned, const char*);
-void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const char*);
-}
-
-@interface NanaButtonTarget : NSObject
-@property (nonatomic) void* basicWindow;
-@end
-@implementation NanaButtonTarget
-- (void)onClick:(id)sender {
-    if (_basicWindow) {
-        auto* bw = (nana::detail::basic_window*)_basicWindow;
-        auto& b = nana::detail::bedrock::instance();
-        nana::arg_click arg; arg.window_handle = bw; arg.mouse_args = nullptr;
-        b.emit(nana::event_code::click, bw, arg, true, b.get_thread_context(bw->thread_id));
-        b.wd_manager().do_lazy_refresh(bw, false);
-    }
-}
-@end
 
 // ============ NanaNSView ============
 @interface NanaNSView : NSView <NSTextInputClient>
@@ -78,12 +34,35 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
 @property (nonatomic) NSPoint caretPos;
 @property (nonatomic) NSSize  caretSize;
 @property (nonatomic, strong) NSTimer* caretTimer;
+// Modifier state of the previous flagsChanged: event, for detecting which
+// modifier was pressed or released.
+@property (nonatomic) NSUInteger lastModifierFlags;
+@property (nonatomic) BOOL hasLastModifierFlags;
+// Private helpers, declared here so they can be used before their definitions.
+- (void)forwardMouse:(NSEvent*)e type:(int)t;
+- (nana::point)cvtPt:(NSPoint)pt;
+- (BOOL)updateHoverAt:(NSPoint)loc;
+- (void)sendKeyEvent:(wchar_t)key pressed:(BOOL)down;
+- (wchar_t)nanaKeyForEvent:(NSEvent*)event;
+- (void)resetModifierState;
 @end
 
 @implementation NanaNSView
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)isFlipped { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return YES; }
+
+// Without this, AppKit swallows the click that reactivates an inactive window
+// (the default is to only activate). Clicking a nana widget while another nana
+// popup, e.g. a combobox drop-down, is the key window would then do nothing.
+- (BOOL)acceptsFirstMouse:(NSEvent*)event { (void)event; return YES; }
+
+// Start from a clean modifier baseline so the first flagsChanged: after gaining
+// focus reports a real transition instead of being discarded.
+- (BOOL)becomeFirstResponder {
+    [self resetModifierState];
+    return [super becomeFirstResponder];
+}
 
 - (void)drawRect:(NSRect)dirtyRect {
     if (!_nanaRootWindow) return;
@@ -107,6 +86,42 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
 }
 
 - (nana::point)cvtPt:(NSPoint)pt { return nana::point((int)pt.x, (int)pt.y); }
+
+// AppKit clears the tracking areas before calling this, so re-establish ours.
+// Without a tracking area the view receives neither mouseMoved: nor the
+// enter/exit events, which leaves widget hover state stuck.
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    for (NSTrackingArea* ta in [self trackingAreas])
+        [self removeTrackingArea:ta];
+    NSTrackingArea* area = [[NSTrackingArea alloc]
+        initWithRect:NSZeroRect
+             options:(NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
+                      NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect)
+               owner:self
+            userInfo:nil];
+    [self addTrackingArea:area];
+    [area release];
+}
+
+// Resolve the widget under a view-space point and drive nana's hover state.
+// Returns YES when the hovered widget changed.
+- (BOOL)updateHoverAt:(NSPoint)loc {
+    if (!_nanaRootWindow) return NO;
+    auto& b = nana::detail::bedrock::instance();
+    auto* rw = b.wd_manager().root((nana::native_window_type)_nanaRootWindow);
+    if (!rw) return NO;
+    nana::point pt = [self cvtPt:loc];
+    auto* tw = b.wd_manager().find_window((nana::native_window_type)_nanaRootWindow, pt);
+    return nana::detail::cocoa_mouse_hover((nana::native_window_type)_nanaRootWindow, tw ? tw : rw, pt) ? YES : NO;
+}
+
+- (void)mouseEntered:(NSEvent*)e {
+    [self updateHoverAt:[self convertPoint:[e locationInWindow] fromView:nil]];
+}
+- (void)mouseExited:(NSEvent*)e {
+    nana::detail::cocoa_mouse_leave((nana::native_window_type)_nanaRootWindow);
+}
 
 - (void)mouseDown:(NSEvent*)e {
     [self.window makeKeyWindow];
@@ -134,12 +149,20 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
     NSUInteger fl = [NSEvent modifierFlags];
     arg.alt=(fl&NSEventModifierFlagOption)!=0; arg.ctrl=(fl&NSEventModifierFlagControl)!=0; arg.shift=(fl&NSEventModifierFlagShift)!=0;
     arg.left_button=arg.right_button=arg.mid_button=false;
-    if(t==0){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::left_button;arg.left_button=true;tw->set_action(nana::mouse_action::pressed);b.wd_manager().set_focus(tw,false,nana::arg_focus::reason::mouse_press);b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    BOOL hover_changed = NO;
+    // A double click *replaces* mouse_down, matching WM_LBUTTONDBLCLK on Windows
+    // and the POSIX backend: the first press of the pair already delivered a
+    // normal mouse_down, so widgets see down, up, dbl_click, up.
+    if(t==0){bool dbl=([e clickCount]>=2)&&tw->flags.dbl_click;arg.evt_code=dbl?nana::event_code::dbl_click:nana::event_code::mouse_down;arg.button=nana::mouse::left_button;arg.left_button=true;tw->set_action(nana::mouse_action::pressed);b.wd_manager().set_focus(tw,false,nana::arg_focus::reason::mouse_press);b.emit(arg.evt_code,tw,arg,true,b.get_thread_context(tw->thread_id));}
     else if(t==1){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::left_button;tw->set_action(nana::mouse_action::normal);b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));nana::arg_click ca;ca.window_handle=tw;ca.mouse_args=&arg;b.emit(nana::event_code::click,tw,ca,true,b.get_thread_context(tw->thread_id));}
-    else if(t==2){arg.evt_code=nana::event_code::mouse_down;arg.button=nana::mouse::right_button;arg.right_button=true;b.emit(nana::event_code::mouse_down,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==2){bool dbl=([e clickCount]>=2)&&tw->flags.dbl_click;arg.evt_code=dbl?nana::event_code::dbl_click:nana::event_code::mouse_down;arg.button=nana::mouse::right_button;arg.right_button=true;b.emit(arg.evt_code,tw,arg,true,b.get_thread_context(tw->thread_id));}
     else if(t==3){arg.evt_code=nana::event_code::mouse_up;arg.button=nana::mouse::right_button;b.emit(nana::event_code::mouse_up,tw,arg,true,b.get_thread_context(tw->thread_id));}
-    else if(t==4){arg.evt_code=nana::event_code::mouse_move;b.emit(nana::event_code::mouse_move,tw,arg,true,b.get_thread_context(tw->thread_id));}
+    else if(t==4){hover_changed=[self updateHoverAt:loc];arg.evt_code=nana::event_code::mouse_move;b.emit(nana::event_code::mouse_move,tw,arg,true,b.get_thread_context(tw->thread_id));}
     else if(t==5){nana::arg_wheel wa;wa.window_handle=tw;wa.evt_code=nana::event_code::mouse_wheel;wa.pos=arg.pos;wa.upwards=([e scrollingDeltaY]>0);wa.distance=120;wa.which=nana::arg_wheel::wheel::vertical;b.emit(nana::event_code::mouse_wheel,tw,wa,true,b.get_thread_context(tw->thread_id));}
+    // A plain mouse_move repaints only the widget itself (bedrock::emit does
+    // that already). Repainting the whole widget tree on every move event is
+    // needlessly expensive, so defer that to when the hovered widget changed.
+    if(t==4 && !hover_changed) return;
     // Defer refresh to next runloop iteration so all event handlers
     // (label _m_caption, etc.) have completed before we repaint.
     auto* root_native = _nanaRootWindow;
@@ -155,8 +178,71 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
 }
 
 - (void)keyDown:(NSEvent *)event {
-    // Use macOS input system: handles IME, special keys, and regular characters
+    if (!_nanaRootWindow) { [super keyDown:event]; return; }
+
+    // Accelerators first, matching bedrock_posix.cpp.
+    if (nana::detail::cocoa_translate_accel((nana::native_window_type)_nanaRootWindow, (__bridge void*)event))
+        return;
+
+    // key_press for every key, mirroring WM_KEYDOWN. Safe alongside the
+    // key_char emitted below: text_editor::respond_key ignores printable keys,
+    // text insertion is driven by key_char.
+    wchar_t key = [self nanaKeyForEvent:event];
+    if (key) [self sendKeyEvent:key pressed:YES];
+
+    // IME and key_char, unchanged.
     [self interpretKeyEvents:@[event]];
+}
+
+- (void)keyUp:(NSEvent *)event {
+    wchar_t key = [self nanaKeyForEvent:event];
+    if (key) [self sendKeyEvent:key pressed:NO];
+    else [super keyUp:event];
+}
+
+// A modifier-only change never reaches keyDown:, so report the press/release of
+// Shift/Ctrl/Option/Command from here.
+- (void)flagsChanged:(NSEvent*)event {
+    NSUInteger now = [event modifierFlags];
+    if (!_hasLastModifierFlags) {
+        // First event after gaining focus: record the state, report nothing.
+        _lastModifierFlags = now;
+        _hasLastModifierFlags = YES;
+        return;
+    }
+    NSUInteger prev = _lastModifierFlags;
+    _lastModifierFlags = now;
+
+    const struct { NSUInteger mask; wchar_t key; } tbl[] = {
+        { NSEventModifierFlagShift,   nana::keyboard::os_shift },
+        { NSEventModifierFlagControl, nana::keyboard::os_ctrl  },
+        { NSEventModifierFlagOption,  nana::keyboard::alt      },
+        { NSEventModifierFlagCommand, nana::keyboard::os_ctrl  }, // Command -> nana's ctrl-modifier code
+    };
+    for (const auto& m : tbl) {
+        bool was = (prev & m.mask) != 0;
+        bool is  = (now  & m.mask) != 0;
+        if (is && !was) [self sendKeyEvent:m.key pressed:YES];
+        else if (!is && was) [self sendKeyEvent:m.key pressed:NO];
+    }
+}
+
+// Seed the modifier baseline from the current state, so the next flagsChanged:
+// reports a real transition.
+- (void)resetModifierState {
+    _lastModifierFlags = [NSEvent modifierFlags];
+    _hasLastModifierFlags = YES;
+}
+
+// Translate an NSEvent to a nana key, preferring the virtual key code and
+// falling back to the NSFunctionKeyRange characters.
+- (wchar_t)nanaKeyForEvent:(NSEvent*)event {
+    wchar_t key = nana::detail::cocoa_key_from_keycode([event keyCode]);
+    if (!key) {
+        const char* u = [[event charactersIgnoringModifiers] UTF8String];
+        if (u) key = nana::detail::cocoa_key_from_function_char(u, ::strlen(u));
+    }
+    return key;
 }
 
 // Helper: get focused window and send text to it
@@ -182,8 +268,8 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
     [self setNeedsDisplay:YES];
 }
 
-// Helper: send key_press for special keys
-- (void)sendKeyPress:(wchar_t)key {
+// Helper: emit key_press or key_release for the focused widget
+- (void)sendKeyEvent:(wchar_t)key pressed:(BOOL)down {
     if (!_nanaRootWindow) return;
     auto& b = nana::detail::bedrock::instance();
     auto* rw = b.wd_manager().root((nana::native_window_type)_nanaRootWindow);
@@ -192,12 +278,17 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
     auto* focused = attr_root ? attr_root->focus : nullptr;
     if (!focused) focused = rw;
 
+    NSUInteger fl = [NSEvent modifierFlags];
     nana::arg_keyboard arg;
-    arg.evt_code = nana::event_code::key_press;
+    arg.evt_code = down ? nana::event_code::key_press : nana::event_code::key_release;
     arg.key = key;
     arg.window_handle = focused;
+    arg.ignore = false;
+    arg.alt   = (fl & NSEventModifierFlagOption) != 0;
+    arg.ctrl  = (fl & NSEventModifierFlagControl) != 0;
+    arg.shift = (fl & NSEventModifierFlagShift) != 0;
     auto* ctx = b.get_thread_context(focused->thread_id);
-    b.emit(nana::event_code::key_press, focused, arg, true, ctx);
+    b.emit(arg.evt_code, focused, arg, true, ctx);
     b.wd_manager().do_lazy_refresh(rw, true, true);
     [self setNeedsDisplay:YES];
 }
@@ -217,34 +308,37 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
     }
 }
 
+// interpretKeyEvents: routes keys that produce no text here. key_press is now
+// emitted from keyDown: as the single source (mirroring WM_KEYDOWN preceding
+// WM_CHAR), so for the no-text keys below there is nothing left to do.
 - (void)doCommandBySelector:(SEL)selector {
-    // Handle special keys: backspace, arrows, etc.
-    if (selector == @selector(deleteBackward:)) {
-        [self sendKeyPress:nana::keyboard::backspace];
-    } else if (selector == @selector(deleteForward:)) {
-        [self sendKeyPress:nana::keyboard::del];
-    } else if (selector == @selector(insertTab:)) {
-        [self sendKeyPress:nana::keyboard::tab];
-    } else if (selector == @selector(insertNewline:) || selector == @selector(insertLineBreak:)) {
-        [self sendKeyPress:nana::keyboard::enter];
-    } else if (selector == @selector(moveLeft:)) {
-        [self sendKeyPress:nana::keyboard::os_arrow_left];
-    } else if (selector == @selector(moveRight:)) {
-        [self sendKeyPress:nana::keyboard::os_arrow_right];
-    } else if (selector == @selector(moveUp:)) {
-        [self sendKeyPress:nana::keyboard::os_arrow_up];
-    } else if (selector == @selector(moveDown:)) {
-        [self sendKeyPress:nana::keyboard::os_arrow_down];
-    } else if (selector == @selector(cancelOperation:)) {
-        [self sendKeyPress:nana::keyboard::escape];
-    } else {
-        // Unknown command (punctuation etc.) - try sending as text via insertText path
-        NSEvent* evt = [NSApp currentEvent];
-        NSString* chars = evt ? [evt characters] : nil;
-        if (chars && [chars length] > 0) {
-            [self insertText:chars replacementRange:NSMakeRange(NSNotFound, 0)];
-        }
-    }
+    if (selector == @selector(deleteBackward:)
+        || selector == @selector(deleteForward:)
+        || selector == @selector(insertTab:)
+        || selector == @selector(insertBacktab:)
+        || selector == @selector(insertNewline:)
+        || selector == @selector(insertLineBreak:)
+        || selector == @selector(moveLeft:)
+        || selector == @selector(moveRight:)
+        || selector == @selector(moveUp:)
+        || selector == @selector(moveDown:)
+        || selector == @selector(cancelOperation:))
+        return;
+
+    // Unknown command - try sending as text via insertText path
+    NSEvent* evt = [NSApp currentEvent];
+    NSString* chars = evt ? [evt characters] : nil;
+    if (!chars || [chars length] == 0)
+        return;
+
+    // Never forward a key that produces no text: control characters (backspace
+    // is 0x7F, return 0x0D, escape 0x1B, ...) and the NSFunctionKeyRange
+    // (arrows, function keys, home/end/page). key_press already covered them.
+    unichar c = [chars characterAtIndex:0];
+    if (c < 0x20 || c == 0x7F || (c >= 0xF700 && c <= 0xF747))
+        return;
+
+    [self insertText:chars replacementRange:NSMakeRange(NSNotFound, 0)];
 }
 
 // NSTextInputClient protocol (minimal implementation for IME support)
@@ -329,6 +423,11 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
 @interface NanaNSWindow : NSWindow
 @end
 @implementation NanaNSWindow
+// A borderless window refuses key status by default, which would leave nana's
+// popups (float_listbox such as a combobox drop-down, menus) unable to receive
+// keyboard input. Windows' WS_POPUP windows can take focus, so allow it here.
+- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)canBecomeMainWindow { return YES; }
 - (void)sendEvent:(NSEvent *)event {
     NSEventType type = event.type;
     if ((type == NSEventTypeLeftMouseDown || type == NSEventTypeRightMouseDown || type == NSEventTypeOtherMouseDown)
@@ -369,7 +468,14 @@ void nana_macos_update_native_control(void*, int, int, unsigned, unsigned, const
     if (_nanaRoot) { auto& b = nana::detail::bedrock::instance(); auto* rw = b.wd_manager().root((nana::native_window_type)_nanaRoot); if (rw) b.event_focus_changed(rw, (nana::native_window_type)_nanaRoot, true); }
 }
 - (void)windowDidResignKey:(NSNotification*)n {
-    if (_nanaRoot) { auto& b = nana::detail::bedrock::instance(); auto* rw = b.wd_manager().root((nana::native_window_type)_nanaRoot); if (rw) b.event_focus_changed(rw, nullptr, false); }
+    if (_nanaRoot) {
+        // NSTrackingActiveInKeyWindow delivers no mouseExited: when the window
+        // stops being key, so clear the hover state explicitly.
+        nana::detail::cocoa_mouse_leave((nana::native_window_type)_nanaRoot);
+        auto& b = nana::detail::bedrock::instance();
+        auto* rw = b.wd_manager().root((nana::native_window_type)_nanaRoot);
+        if (rw) b.event_focus_changed(rw, nullptr, false);
+    }
 }
 - (void)windowDidMiniaturize:(NSNotification*)n {
     if (_nanaRoot) { auto& b = nana::detail::bedrock::instance(); auto* rw = b.wd_manager().root((nana::native_window_type)_nanaRoot); if (rw) b.event_expose(rw, false); }
@@ -386,141 +492,6 @@ namespace {
     std::map<nana::native_window_type, cocoa_wd> wd_map;
     cocoa_wd* gwd(nana::native_window_type w) { auto it = wd_map.find(w); return (it != wd_map.end()) ? &it->second : nullptr; }
 }
-
-// ============ Native control helpers ============
-extern "C" {
-void* nana_macos_create_native_button(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h, const char* title) {
-    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
-    NSView* pv = pd ? pd->view : nil;
-    if (!pv) return nullptr;
-    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
-    NSButton* btn = [[NSButton alloc] initWithFrame:frame];
-    [btn setTitle:[NSString stringWithUTF8String:title ?: ""]];
-    [btn setBezelStyle:NSBezelStyleRounded];
-    [btn setButtonType:NSButtonTypeMomentaryPushIn];
-    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
-    tgt.basicWindow = bwd_ptr;
-    [btn setTarget:tgt];
-    [btn setAction:@selector(onClick:)];
-    objc_setAssociatedObject(btn, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
-    [pv addSubview:btn];
-    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = btn; }
-    [btn release];
-    return (void*)btn;
-}
-void nana_macos_update_native_control(void* bwd_ptr, int x, int y, unsigned w, unsigned h, const char* title) {
-    std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex);
-    auto it = native_controls.find(bwd_ptr);
-    if (it == native_controls.end()) return;
-    NSView* view = it->second;
-    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
-    [view setFrame:frame];
-    if (title && [view isKindOfClass:[NSButton class]])
-        [(NSButton*)view setTitle:[NSString stringWithUTF8String:title]];
-}
-
-void* nana_macos_create_native_label(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h, const char* title) {
-    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
-    NSView* pv = pd ? pd->view : nil;
-    if (!pv) return nullptr;
-    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
-    NSTextField* label = [[NSTextField alloc] initWithFrame:frame];
-    [label setStringValue:[NSString stringWithUTF8String:title ?: ""]];
-    [label setBezeled:NO];
-    [label setDrawsBackground:NO];
-    [label setEditable:NO];
-    [label setSelectable:NO];
-    [pv addSubview:label];
-    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = label; }
-    [label release];
-    return (void*)label;
-}
-void* nana_macos_create_native_checkbox(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h, const char* title) {
-    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
-    NSView* pv = pd ? pd->view : nil;
-    if (!pv) return nullptr;
-    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
-    NSButton* btn = [[NSButton alloc] initWithFrame:frame];
-    [btn setTitle:[NSString stringWithUTF8String:title ?: ""]];
-    [btn setButtonType:NSButtonTypeSwitch];
-    [btn setState:NSControlStateValueOff];
-    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
-    tgt.basicWindow = bwd_ptr;
-    [btn setTarget:tgt];
-    [btn setAction:@selector(onClick:)];
-    objc_setAssociatedObject(btn, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
-    [pv addSubview:btn];
-    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = btn; }
-    [btn release];
-    return (void*)btn;
-}
-void* nana_macos_create_native_combobox(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h) {
-    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
-    NSView* pv = pd ? pd->view : nil;
-    if (!pv) return nullptr;
-    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
-    NSPopUpButton* popup = [[NSPopUpButton alloc] initWithFrame:frame pullsDown:NO];
-    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
-    tgt.basicWindow = bwd_ptr;
-    [popup setTarget:tgt];
-    [popup setAction:@selector(onClick:)];
-    objc_setAssociatedObject(popup, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
-    [pv addSubview:popup];
-    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = popup; }
-    [popup release];
-    return (void*)popup;
-}
-void* nana_macos_create_native_progress(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h) {
-    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
-    NSView* pv = pd ? pd->view : nil;
-    if (!pv) return nullptr;
-    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
-    NSProgressIndicator* pi = [[NSProgressIndicator alloc] initWithFrame:frame];
-    [pi setStyle:NSProgressIndicatorStyleBar];
-    [pi setIndeterminate:NO];
-    [pi setMinValue:0.0];
-    [pi setMaxValue:100.0];
-    [pi setDoubleValue:0.0];
-    [pv addSubview:pi];
-    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = pi; }
-    [pi release];
-    return (void*)pi;
-}
-void* nana_macos_create_native_slider(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h) {
-    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
-    NSView* pv = pd ? pd->view : nil;
-    if (!pv) return nullptr;
-    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
-    NSSlider* slider = [[NSSlider alloc] initWithFrame:frame];
-    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
-    tgt.basicWindow = bwd_ptr;
-    [slider setTarget:tgt];
-    [slider setAction:@selector(onClick:)];
-    objc_setAssociatedObject(slider, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
-    [pv addSubview:slider];
-    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = slider; }
-    [slider release];
-    return (void*)slider;
-}
-void* nana_macos_create_native_datepicker(void* parent_native, void* bwd_ptr, int x, int y, unsigned w, unsigned h) {
-    cocoa_wd* pd = gwd((nana::native_window_type)parent_native);
-    NSView* pv = pd ? pd->view : nil;
-    if (!pv) return nullptr;
-    NSRect frame = NSMakeRect((CGFloat)x, (CGFloat)y, (CGFloat)w, (CGFloat)h);
-    NSDatePicker* dp = [[NSDatePicker alloc] initWithFrame:frame];
-    [dp setDatePickerStyle:NSDatePickerStyleClockAndCalendar];
-    [dp setDatePickerElements:NSDatePickerElementFlagYearMonthDay];
-    NanaButtonTarget* tgt = [[NanaButtonTarget alloc] init];
-    tgt.basicWindow = bwd_ptr;
-    [dp setTarget:tgt];
-    [dp setAction:@selector(onClick:)];
-    objc_setAssociatedObject(dp, (const void*)"_tgt", tgt, OBJC_ASSOCIATION_RETAIN);
-    [pv addSubview:dp];
-    { std::lock_guard<std::recursive_mutex> lk(native_ctrl_mutex); native_controls[bwd_ptr] = dp; }
-    [dp release];
-    return (void*)dp;
-}
-} // extern "C"
 
 namespace nana { namespace detail {
 
@@ -545,15 +516,49 @@ native_interface::window_result native_interface::create_window(
 {
     @autoreleasepool {
         std::lock_guard<std::recursive_mutex> lk(wd_mutex);
-        NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable;
-        if (app.sizable) style |= NSWindowStyleMaskResizable;
-        if (app.minimize) style |= NSWindowStyleMaskMiniaturizable;
 
+        // Mirrors the reference implementation in native_window_interface.cpp:
+        // `decoration` decides whether the window gets a title bar, `floating`
+        // raises it above normal windows, and the rect of a non-nested window is
+        // relative to its owner's client area (there it is a ClientToScreen call).
+        NSUInteger style = NSWindowStyleMaskBorderless;
+        if (app.decoration)
+        {
+            // A titled NSWindow always draws all three traffic lights; the ones the
+            // style mask does not enable come up greyed out. Windows and X11 take
+            // `app.minimize` literally (an absent WS_MINIMIZEBOX greys the button
+            // out), but on macOS that reads as a broken window, so a decorated
+            // window always gets a working yellow button. `app.maximize` is already
+            // a no-op here for the same reason: the green button is the platform's
+            // zoom control and is governed by NSWindowStyleMaskResizable.
+            style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
+        }
+        if (app.sizable) style |= NSWindowStyleMaskResizable;
+
+        nana::point pt{ r.x, r.y };
         NSScreen* sc = [NSScreen mainScreen];
-        CGFloat cy = [sc frame].size.height - r.y - r.height;
-        NSRect cr = NSMakeRect((CGFloat)r.x, cy, (CGFloat)r.width, (CGFloat)r.height);
+        if (owner && !nested)
+        {
+            cocoa_wd* od = gwd(owner);
+            if (od && od->win)
+            {
+                // contentRectForFrameRect: already returns the content rect in
+                // absolute screen coordinates, so it must not be offset by the
+                // frame origin again.
+                NSRect owner_content = [od->win contentRectForFrameRect:[od->win frame]];
+                sc = [od->win screen] ?: sc;
+                pt.x += static_cast<int>(owner_content.origin.x);
+                pt.y += static_cast<int>([sc frame].size.height - owner_content.origin.y - owner_content.size.height);
+            }
+        }
+
+        CGFloat cy = [sc frame].size.height - pt.y - r.height;
+        NSRect cr = NSMakeRect((CGFloat)pt.x, cy, (CGFloat)r.width, (CGFloat)r.height);
         NanaNSWindow* win = [[NanaNSWindow alloc] initWithContentRect:cr styleMask:style backing:NSBackingStoreBuffered defer:NO];
         if (!win) return {nullptr, 0, 0, 0, 0};
+
+        if (app.floating)
+            [win setLevel:NSFloatingWindowLevel];
 
         [win setTitle:@"Nana Window"];
         [win setReleasedWhenClosed:NO];
@@ -720,18 +725,10 @@ void native_interface::get_window_rect(native_window_type w, rectangle& r) {
 void native_interface::window_caption(native_window_type w, const native_string_type& t) {
     auto* d = gwd(w);
     if (d && d->win) [d->win setTitle:[NSString stringWithUTF8String:t.c_str()]];
-    else {
-        auto it = native_controls.find((void*)w);
-        if (it != native_controls.end() && [it->second isKindOfClass:[NSButton class]])
-            [(NSButton*)it->second setTitle:[NSString stringWithUTF8String:t.c_str()]];
-    }
 }
 auto native_interface::window_caption(native_window_type w) -> native_string_type {
     auto* d = gwd(w);
     if (d && d->win && [d->win title]) return [[d->win title] UTF8String] ?: "";
-    auto it = native_controls.find((void*)w);
-    if (it != native_controls.end() && [it->second isKindOfClass:[NSButton class]])
-        return [[(NSButton*)it->second title] UTF8String] ?: "";
     return "";
 }
 void native_interface::capture_window(native_window_type, bool) {}
@@ -806,8 +803,9 @@ bool native_interface::calc_screen_point(native_window_type w, nana::point& pos)
 	NSRect content = [d->win contentRectForFrameRect:[d->win frame]];
 	NSScreen* sc = [d->win screen] ?: [NSScreen mainScreen];
 	CGFloat screenH = [sc frame].size.height;
-	CGFloat winX = [d->win frame].origin.x + content.origin.x;
-	CGFloat winY = [d->win frame].origin.y + content.origin.y;
+	// contentRectForFrameRect: is already absolute, do not add the frame origin.
+	CGFloat winX = content.origin.x;
+	CGFloat winY = content.origin.y;
 	pos.x += (int)winX;
 	pos.y += (int)(screenH - winY - content.size.height);
 	return true;
@@ -818,8 +816,9 @@ bool native_interface::calc_window_point(native_window_type w, nana::point& pos)
 	NSRect content = [d->win contentRectForFrameRect:[d->win frame]];
 	NSScreen* sc = [d->win screen] ?: [NSScreen mainScreen];
 	CGFloat screenH = [sc frame].size.height;
-	CGFloat winX = [d->win frame].origin.x + content.origin.x;
-	CGFloat winY = [d->win frame].origin.y + content.origin.y;
+	// contentRectForFrameRect: is already absolute, do not add the frame origin.
+	CGFloat winX = content.origin.x;
+	CGFloat winY = content.origin.y;
 	pos.x -= (int)winX;
 	pos.y = (int)(screenH - pos.y - winY - content.size.height);
 	return true;

@@ -57,6 +57,11 @@ if(APPLE)
         "${NANA_SOURCE_DIR}/paint/detail/native_paint_interface.cpp"
         "${NANA_SOURCE_DIR}/gui/detail/native_window_interface.cpp"
         "${NANA_SOURCE_DIR}/gui/dragdrop.cpp"
+        # platform_abstraction.cpp and platform_abstraction_macos.mm define the
+        # same nana::platform_abstraction members. The .cpp's macOS path is
+        # incomplete (font_factory() falls through to return {}; and screen_dpi()
+        # has no macOS branch), so keep the Cocoa implementation only.
+        "${NANA_SOURCE_DIR}/detail/platform_abstraction.cpp"
     )
     foreach(excl ${NANA_EXCLUDE_SOURCES})
         list(REMOVE_ITEM SOURCES ${excl})

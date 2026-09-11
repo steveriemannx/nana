@@ -244,33 +244,30 @@ namespace detail
 
 	void drawable_impl_type::update_color()
 	{
-		if (bgcolor_rgb != current_color_)
+		// Apply unconditionally. The old `if (bgcolor_rgb != current_color_)` guard
+		// used a cache shared with update_text_color(), so any other path that
+		// changed the CGContext fill (set_pixel, CoreText) left the cache stale and
+		// the update was skipped, filling shapes with the leftover colour.
+		if(context)
 		{
-			current_color_ = bgcolor_rgb;
-			if(context)
-			{
-				CGFloat r = ((bgcolor_rgb >> 16) & 0xFF) / 255.0;
-				CGFloat g = ((bgcolor_rgb >> 8) & 0xFF) / 255.0;
-				CGFloat b = (bgcolor_rgb & 0xFF) / 255.0;
-				CGContextSetRGBFillColor(reinterpret_cast<CGContextRef>(context), r, g, b, 1.0);
-				CGContextSetRGBStrokeColor(reinterpret_cast<CGContextRef>(context), r, g, b, 1.0);
-			}
+			CGFloat r = ((bgcolor_rgb >> 16) & 0xFF) / 255.0;
+			CGFloat g = ((bgcolor_rgb >> 8) & 0xFF) / 255.0;
+			CGFloat b = (bgcolor_rgb & 0xFF) / 255.0;
+			CGContextSetRGBFillColor(reinterpret_cast<CGContextRef>(context), r, g, b, 1.0);
+			CGContextSetRGBStrokeColor(reinterpret_cast<CGContextRef>(context), r, g, b, 1.0);
 		}
 	}
 
 	void drawable_impl_type::update_text_color()
 	{
-		if (fgcolor_rgb != current_color_)
+		// See update_color(): same unconditional apply, same stale-cache reason.
+		if(context)
 		{
-			current_color_ = fgcolor_rgb;
-			if(context)
-			{
-				CGFloat r = ((fgcolor_rgb >> 16) & 0xFF) / 255.0;
-				CGFloat g = ((fgcolor_rgb >> 8) & 0xFF) / 255.0;
-				CGFloat b = (fgcolor_rgb & 0xFF) / 255.0;
-				CGContextSetRGBFillColor(reinterpret_cast<CGContextRef>(context), r, g, b, 1.0);
-				CGContextSetRGBStrokeColor(reinterpret_cast<CGContextRef>(context), r, g, b, 1.0);
-			}
+			CGFloat r = ((fgcolor_rgb >> 16) & 0xFF) / 255.0;
+			CGFloat g = ((fgcolor_rgb >> 8) & 0xFF) / 255.0;
+			CGFloat b = (fgcolor_rgb & 0xFF) / 255.0;
+			CGContextSetRGBFillColor(reinterpret_cast<CGContextRef>(context), r, g, b, 1.0);
+			CGContextSetRGBStrokeColor(reinterpret_cast<CGContextRef>(context), r, g, b, 1.0);
 		}
 	}
 

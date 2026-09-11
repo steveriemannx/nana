@@ -27,9 +27,6 @@ namespace nana
 {
 namespace detail
 {
-	// Forward declarations of functions in native_window_interface.cpp (Cocoa section)
-	void cocoa_apply_exposed_position(native_window_type wd);
-
 	struct bedrock::private_impl
 	{
 		typedef std::map<unsigned, thread_context> thr_context_container;
@@ -51,7 +48,6 @@ namespace detail
 	void timer_proc(thread_t);
 	void window_proc_dispatcher(void*, nana::detail::msg_packet_tag&);
 	void window_proc_for_packet(void*, nana::detail::msg_packet_tag&);
-	void window_proc_for_nsevent(void*, void* /*NSEvent*/, msg_packet_tag&);
 
 	class accel_key_comparer
 	{
@@ -82,14 +78,6 @@ namespace detail
 	};
 
 	bedrock bedrock::bedrock_object;
-
-	unsigned long event_window(const void* nsevent)
-	{
-		// Extract window handle from NSEvent
-		NSEvent* evt = (__bridge NSEvent*)nsevent;
-		NSWindow* win = [evt window];
-		return reinterpret_cast<unsigned long>((__bridge void*)win);
-	}
 
 	bedrock::bedrock()
 		: pi_data_(new pi_data), impl_(new private_impl)
@@ -213,84 +201,58 @@ namespace detail
 		// No implementation for Cocoa
 	}
 
-	void assign_arg(arg_mouse& arg, basic_window* wd, unsigned msg, const void* nsevent)
+	// Drives nana's hover state for the widget under the cursor. This mirrors the
+	// Windows model: leave the previously hovered widget, then enter the new one,
+	// and let the caller emit mouse_move afterwards. Without it the hover
+	// highlight sticks, because mouse_leave is never produced.
+	bool cocoa_mouse_hover(native_window_type root_native, basic_window* wd, const nana::point& pos)
 	{
-		NSEvent* evt = (__bridge NSEvent*)nsevent;
+		static auto& brock = bedrock::instance();
+		auto* misc = brock.wd_manager().root_runtime(root_native);
+		if (!misc)
+			return false;
+
+		if (!brock.wd_manager().available(misc->condition.hovered))
+			misc->condition.hovered = nullptr;
+
+		if (misc->condition.hovered == wd)
+			return false;
+
+		brock.event_msleave(misc->condition.hovered);
+		misc->condition.hovered = nullptr;
+
+		if (!wd)
+			return true;
+
+		// Windows does not gate mouse_enter on flags.enabled (unlike
+		// event_msleave). Keep that asymmetry so hover behaves identically.
+		if (mouse_action::pressed != wd->flags.action)
+			wd->set_action(mouse_action::hovered);
+
+		arg_mouse arg;
+		arg.evt_code = event_code::mouse_enter;
 		arg.window_handle = wd;
-		arg.button = ::nana::mouse::any_button;
+		arg.pos.x = pos.x - wd->pos_root.x;
+		arg.pos.y = pos.y - wd->pos_root.y;
+		arg.left_button = arg.right_button = arg.mid_button = false;
+		NSUInteger fl = [NSEvent modifierFlags];
+		arg.alt = (fl & NSEventModifierFlagOption) != 0;
+		arg.ctrl = (fl & NSEventModifierFlagControl) != 0;
+		arg.shift = (fl & NSEventModifierFlagShift) != 0;
+		brock.emit(event_code::mouse_enter, wd, arg, true, brock.get_thread_context(wd->thread_id));
 
-		NSPoint loc = [evt locationInWindow];
-		NSUInteger flags = [NSEvent modifierFlags];
-
-		switch([evt type])
-		{
-		case NSEventTypeLeftMouseDown:
-		case NSEventTypeRightMouseDown:
-		case NSEventTypeOtherMouseDown:
-			arg.evt_code = event_code::mouse_down;
-			arg.pos.x = static_cast<int>(loc.x) - wd->pos_root.x;
-			arg.pos.y = static_cast<int>(loc.y) - wd->pos_root.y;
-			switch([evt buttonNumber])
-			{
-			case 0: arg.button = ::nana::mouse::left_button; break;
-			case 1: arg.button = ::nana::mouse::right_button; break;
-			case 2: arg.button = ::nana::mouse::middle_button; break;
-			}
-			break;
-		case NSEventTypeLeftMouseUp:
-		case NSEventTypeRightMouseUp:
-		case NSEventTypeOtherMouseUp:
-			arg.evt_code = event_code::mouse_up;
-			arg.pos.x = static_cast<int>(loc.x) - wd->pos_root.x;
-			arg.pos.y = static_cast<int>(loc.y) - wd->pos_root.y;
-			break;
-		case NSEventTypeMouseMoved:
-		case NSEventTypeLeftMouseDragged:
-		case NSEventTypeRightMouseDragged:
-			arg.evt_code = event_code::mouse_move;
-			arg.pos.x = static_cast<int>(loc.x) - wd->pos_root.x;
-			arg.pos.y = static_cast<int>(loc.y) - wd->pos_root.y;
-			break;
-		case NSEventTypeMouseEntered:
-			arg.evt_code = event_code::mouse_enter;
-			arg.pos.x = static_cast<int>(loc.x) - wd->pos_root.x;
-			arg.pos.y = static_cast<int>(loc.y) - wd->pos_root.y;
-			break;
-		default:
-			break;
-		}
-
-		arg.left_button = ([evt type] == NSEventTypeLeftMouseDown || [evt type] == NSEventTypeLeftMouseDragged);
-		arg.right_button = ([evt type] == NSEventTypeRightMouseDown || [evt type] == NSEventTypeRightMouseDragged);
-		arg.mid_button = ([evt buttonNumber] == 2);
-		arg.alt = ((flags & NSEventModifierFlagOption) != 0);
-		arg.shift = ((flags & NSEventModifierFlagShift) != 0);
-		arg.ctrl = ((flags & NSEventModifierFlagControl) != 0);
+		misc->condition.hovered = wd;
+		return true;
 	}
 
-	void assign_arg(arg_focus& arg, basic_window* wd, native_window_type recv, bool getting)
+	void cocoa_mouse_leave(native_window_type root_native)
 	{
-		arg.window_handle = wd;
-		arg.receiver = recv;
-		arg.getting = getting;
-		arg.focus_reason = arg_focus::reason::general;
-	}
-
-	void assign_arg(arg_wheel& arg, basic_window* wd, const void* nsevent)
-	{
-		NSEvent* evt = (__bridge NSEvent*)nsevent;
-		arg.evt_code = event_code::mouse_wheel;
-		arg.window_handle = wd;
-
-		NSPoint loc = [evt locationInWindow];
-		arg.pos.x = static_cast<int>(loc.x) - wd->pos_root.x;
-		arg.pos.y = static_cast<int>(loc.y) - wd->pos_root.y;
-
-		arg.upwards = ([evt scrollingDeltaY] > 0);
-		arg.left_button = arg.mid_button = arg.right_button = false;
-		arg.shift = arg.ctrl = false;
-		arg.distance = 120;
-		arg.which = arg_wheel::wheel::vertical;
+		static auto& brock = bedrock::instance();
+		auto* misc = brock.wd_manager().root_runtime(root_native);
+		if (!misc)
+			return;
+		brock.event_msleave(misc->condition.hovered);
+		misc->condition.hovered = nullptr;
 	}
 
 	void timer_proc(thread_t tid)
@@ -363,9 +325,11 @@ namespace detail
 		if(thrd) thrd->event_window = pre_wd;
 	}
 
-	static wchar_t os_code_from_keycode(unsigned short keyCode)
+	// Map a macOS virtual key code to a nana keyboard code. Nana's keyboard::os_*
+	// constants are the Windows VK codes, so function keys use VK_F1.. (0x70..)
+	// to stay consistent with what bedrock_windows.cpp passes through.
+	wchar_t cocoa_key_from_keycode(unsigned short keyCode)
 	{
-		// Map macOS key codes to nana keyboard codes
 		switch(keyCode)
 		{
 		case 0x00: return 'a';
@@ -423,22 +387,72 @@ namespace detail
 		case 0x3C: return keyboard::os_shift; // right shift
 		case 0x3D: return keyboard::alt;      // right option
 		case 0x3E: return keyboard::os_ctrl;  // right control
-		case 0x7A: return keyboard::os_arrow_left;   // F1 = left (mapped)
-		case 0x7B: return keyboard::os_arrow_right;  // F2 = right
-		case 0x7D: return keyboard::os_arrow_down;   // F3 = down
-		case 0x7E: return keyboard::os_arrow_up;     // F4 = up
-		case 0x72: return keyboard::os_insert;
-		case 0x73: return keyboard::os_pageup;  // home
-		case 0x74: return keyboard::os_pagedown; // page up
-		case 0x75: return keyboard::del;
-		case 0x77: return keyboard::os_pagedown; // end
-		case 0x79: return keyboard::os_pageup;   // page down
-		case 0x7F: return keyboard::os_pagedown; // page down
+		// Arrow keys. 0x7A-0x7E are kVK_F1.., not arrows.
+		case 0x7B: return keyboard::os_arrow_left;
+		case 0x7C: return keyboard::os_arrow_right;
+		case 0x7D: return keyboard::os_arrow_down;
+		case 0x7E: return keyboard::os_arrow_up;
+		// Navigation cluster
+		case 0x72: return keyboard::os_insert;   // Help
+		case 0x73: return keyboard::os_home;
+		case 0x74: return keyboard::os_pageup;
+		case 0x75: return keyboard::del;         // forward delete
+		case 0x77: return keyboard::os_end;
+		case 0x79: return keyboard::os_pagedown;
+		// Function keys (VK_F1 == 0x70)
+		case 0x7A: return 0x70;  // F1
+		case 0x78: return 0x71;  // F2
+		case 0x63: return 0x72;  // F3
+		case 0x76: return 0x73;  // F4
+		case 0x60: return 0x74;  // F5
+		case 0x61: return 0x75;  // F6
+		case 0x62: return 0x76;  // F7
+		case 0x64: return 0x77;  // F8
+		case 0x65: return 0x78;  // F9
+		case 0x6D: return 0x79;  // F10
+		case 0x67: return 0x7A;  // F11
+		case 0x6F: return 0x7B;  // F12
 		default:   return '\0';
 		}
 	}
 
-	static bool translate_keyboard_accelerator(root_misc* misc, char os_code, const arg_keyboard& modifiers)
+	// Decode the NSFunctionKeyRange characters (0xF700-0xF747) that AppKit puts
+	// in an NSEvent's characters for keys that produce no text. This is an
+	// independent cross-check of cocoa_key_from_keycode above.
+	wchar_t cocoa_key_from_function_char(const char* utf8, std::size_t len)
+	{
+		if (!utf8 || len == 0) return '\0';
+		std::wstring w = nana::to_wstring(std::string(utf8, utf8 + len));
+		if (w.empty()) return '\0';
+		switch (w[0])
+		{
+		case NSF1FunctionKey:            return 0x70;
+		case NSF2FunctionKey:            return 0x71;
+		case NSF3FunctionKey:            return 0x72;
+		case NSF4FunctionKey:            return 0x73;
+		case NSF5FunctionKey:            return 0x74;
+		case NSF6FunctionKey:            return 0x75;
+		case NSF7FunctionKey:            return 0x76;
+		case NSF8FunctionKey:            return 0x77;
+		case NSF9FunctionKey:            return 0x78;
+		case NSF10FunctionKey:           return 0x79;
+		case NSF11FunctionKey:           return 0x7A;
+		case NSF12FunctionKey:           return 0x7B;
+		case NSInsertFunctionKey:        return keyboard::os_insert;
+		case NSDeleteFunctionKey:        return keyboard::del;
+		case NSHomeFunctionKey:          return keyboard::os_home;
+		case NSEndFunctionKey:           return keyboard::os_end;
+		case NSPageUpFunctionKey:        return keyboard::os_pageup;
+		case NSPageDownFunctionKey:      return keyboard::os_pagedown;
+		case NSUpArrowFunctionKey:       return keyboard::os_arrow_up;
+		case NSDownArrowFunctionKey:     return keyboard::os_arrow_down;
+		case NSLeftArrowFunctionKey:     return keyboard::os_arrow_left;
+		case NSRightArrowFunctionKey:    return keyboard::os_arrow_right;
+		default:                         return '\0';
+		}
+	}
+
+	bool translate_keyboard_accelerator(root_misc* misc, char os_code, const arg_keyboard& modifiers)
 	{
 		if(!misc->wpassoc)
 			return false;
@@ -465,6 +479,42 @@ namespace detail
 		return true;
 	}
 
+	// Satisfy a registered keyboard accelerator (API::register_accel_key /
+	// form::keyboard_accelerator) from an NSEvent. Windows uses Ctrl as the
+	// accelerator modifier; the macOS convention is Command, so a Cmd+<key>
+	// press also matches accelerators registered with ctrl == true.
+	bool cocoa_translate_accel(native_window_type root_native, const void* nsevent)
+	{
+		NSEvent* e = (__bridge NSEvent*)nsevent;
+		NSString* s = [e charactersIgnoringModifiers];
+		if (!s || [s length] != 1)
+			return false;
+
+		static auto& brock = bedrock::instance();
+		auto* misc = brock.wd_manager().root_runtime(root_native);
+		if (!misc || !misc->wpassoc)
+			return false;
+
+		char key = (char)[s characterAtIndex:0];
+		NSUInteger fl = [e modifierFlags];
+		bool cmd = (fl & NSEventModifierFlagCommand) != 0;
+
+		arg_keyboard mods;
+		mods.alt   = (fl & NSEventModifierFlagOption)  != 0;
+		mods.ctrl  = (fl & NSEventModifierFlagControl) != 0;
+		mods.shift = (fl & NSEventModifierFlagShift)   != 0;
+
+		if (translate_keyboard_accelerator(misc, key, mods))
+			return true;
+
+		if (cmd && !mods.ctrl && !mods.alt)
+		{
+			mods.ctrl = true;
+			return translate_keyboard_accelerator(misc, key, mods);
+		}
+		return false;
+	}
+
 	void cocoa_lookup_chars(const root_misc* rruntime, basic_window * msgwd, const char* keybuf, std::size_t keybuf_len, const arg_keyboard& modifiers_status)
 	{
 		if (!msgwd->flags.enabled)
@@ -478,6 +528,9 @@ namespace detail
 		auto wstr = nana::to_wstring(std::string{keybuf, keybuf + keybuf_len});
 		auto const charbuf = wstr.c_str();
 		auto const len = wstr.length();
+
+		// Nothing else ever sets this, so alt-shortkeys (&label) could not fire.
+		context.is_alt_pressed = modifiers_status.alt;
 
 		for(std::size_t i = 0; i < len; ++i)
 		{
@@ -547,11 +600,20 @@ namespace detail
 		// Manual event loop — processes NSEvents and internal messages
 		while (context->window_count > 0) {
 			@autoreleasepool {
+				// Bounded wait. The run loop still services its own sources
+				// (NSTimers, dispatch_async on the main queue) while waiting,
+				// but we must return periodically so nana's timers can run.
 				NSEvent* ev = [NSApp nextEventMatchingMask:NSEventMaskAny
-					untilDate:[NSDate distantFuture]
+					untilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]
 					inMode:NSDefaultRunLoopMode dequeue:YES];
 				if (ev) [NSApp sendEvent:ev];
 			}
+
+			// bedrock_posix reaches this through msg_dispatcher::dispatch():
+			// queue empty -> _m_wait_for_queue() times out -> proc_.timer_proc(tid).
+			// There is no such queue here, so call the same entry point directly.
+			// Without this nana::timer (and animation/tooltip timeouts) never fire.
+			timer_proc(::nana::system::this_thread_id());
 		}
 
 		if(owner_native)

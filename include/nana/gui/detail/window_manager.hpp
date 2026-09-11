@@ -150,6 +150,8 @@ namespace detail
 	private:
 		void _m_disengage(basic_window*, basic_window* for_new);
 		void _m_destroy(basic_window*);
+		//Drops the mouse capture if it is held by wd or by a window of wd's root.
+		void _m_release_capture_of(basic_window* wd);
 		void _m_move_core(basic_window*, const point& delta);
 		void _m_shortkeys(basic_window*, bool with_chlidren, std::vector<std::pair<basic_window*, unsigned long>>& keys) const;
 		basic_window* _m_find(basic_window*, const point&);

@@ -96,8 +96,8 @@ void graphics::rgb_to_wb(){CGContextRef c=C(impl_->pd.get());if(!c)return;unsign
 
 void graphics::string(const ::nana::point&p,std::string_view s){if(impl_->pd){auto ws=nana::to_wstring(std::string(s));detail::draw_string(impl_->pd.get(),p,ws.c_str(),ws.size());}}
 void graphics::string(const ::nana::point&p,std::wstring_view s){if(impl_->pd)detail::draw_string(impl_->pd.get(),p,s.data(),s.size());}
-void graphics::string(const ::nana::point&p,std::string_view s,const ::nana::color&clr){palette(false,clr);string(p,s);}
-void graphics::string(const ::nana::point&p,std::wstring_view s,const ::nana::color&clr){palette(false,clr);string(p,s);}
+void graphics::string(const ::nana::point&p,std::string_view s,const ::nana::color&clr){palette(true,clr);string(p,s);}
+void graphics::string(const ::nana::point&p,std::wstring_view s,const ::nana::color&clr){palette(true,clr);string(p,s);}
 unsigned graphics::bidi_string(const ::nana::point&p,std::string_view s){string(p,s);return 0;}
 unsigned graphics::bidi_string(const ::nana::point&p,std::wstring_view s){string(p,s);return 0;}
 
